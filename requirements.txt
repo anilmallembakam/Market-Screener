@@ -5,4 +5,4 @@ plotly>=5.18.0
 pandas>=2.0.0
 numpy>=1.24.0
 pytz
-nsedt>=1.0.0
+nsedt>=0.0.16
