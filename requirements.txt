@@ -8,3 +8,4 @@ pytz
 nsedt>=0.0.16
 gspread>=6.0.0
 google-auth>=2.20.0
+toml>=0.10.0

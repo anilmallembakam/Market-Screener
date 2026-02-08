@@ -15,6 +15,9 @@ venv/
 env/
 .env
 
+# Streamlit secrets (NEVER commit - contains API keys)
+.streamlit/secrets.toml
+
 # IDE
 .vscode/
 .idea/
