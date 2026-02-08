@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Daily Trading Screener",
     page_icon="\U0001F4C8",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 from screener.stock_lists import get_stock_list

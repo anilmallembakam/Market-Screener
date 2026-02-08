@@ -33,7 +33,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
 
     col1, col2 = st.columns([1, 3])
     with col1:
-        min_score = st.slider("Min alert score", 1, 10, 3)
+        min_score = st.slider("Min alert score", 1, 10, 5)
     with col2:
         signal_filter = st.radio("Filter", ["All", "Bullish Only", "Bearish Only"],
                                  horizontal=True)

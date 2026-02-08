@@ -86,7 +86,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
                             st.info(f"{mkt.upper()}: No new alerts or market not closed")
 
     # Main filters row
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
     with col1:
         market_filter = st.selectbox(
             "Market",
@@ -102,8 +102,15 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
             key='tracker_direction'
         )
     with col3:
-        days_back = st.selectbox("Show alerts from last", [7, 14, 30, 60], index=2, key='tracker_days')
+        setup_filter = st.selectbox(
+            "Setup",
+            ['All', 'Bull Call Spread', 'Bear Put Spread', 'Iron Condor', 'Long Straddle', 'Calendar Spread'],
+            index=0,
+            key='tracker_setup'
+        )
     with col4:
+        days_back = st.selectbox("Show alerts from last", [7, 14, 30, 60], index=2, key='tracker_days')
+    with col5:
         track_days = st.selectbox("Track performance for", [5, 10, 15, 20], index=3, key='tracker_track')
 
     # Clear old alerts button
@@ -116,9 +123,14 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
     # Convert filter values for query
     market_query = None if market_filter == 'All' else market_filter.lower()
     direction_query = None if direction_filter == 'All' else direction_filter
+    setup_query = None if setup_filter == 'All' else setup_filter
 
     # Load historical alerts with filters
     alerts_df = get_historical_alerts(days_back, market=market_query, direction=direction_query)
+
+    # Filter by setup if specified
+    if setup_query and not alerts_df.empty:
+        alerts_df = alerts_df[alerts_df['combo'].str.contains(setup_query, case=False, na=False)]
 
     if alerts_df.empty:
         st.info("No historical alerts found. Save alerts from the Alerts tab or use Auto-Save.")
@@ -149,6 +161,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
                 'Alert Date': alert_date,
                 'Direction': alert.get('direction', 'N/A'),
                 'Score': alert.get('score', 0),
+                'Setup': alert.get('combo', 'N/A'),
                 'Alert Price': alert.get('alert_price', 0),
                 'Current Price': perf['current_price'],
                 'P&L %': perf['pnl_pct'],
@@ -202,7 +215,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         st.subheader("⚠️ Alerts Losing Steam")
         st.warning(f"{len(losing_steam_df)} alerts are showing weakening momentum - consider exiting")
         st.dataframe(
-            losing_steam_df[['Symbol', 'Market', 'Alert Date', 'Direction', 'P&L %', 'Max Gain %', 'Days']],
+            losing_steam_df[['Symbol', 'Market', 'Alert Date', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Days']],
             use_container_width=True,
             hide_index=True,
         )
@@ -215,7 +228,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         if not top_df.empty:
             st.subheader("🏆 Top 5 Performers")
             st.dataframe(
-                top_df[['Symbol', 'Market', 'Direction', 'P&L %', 'Max Gain %', 'Status']],
+                top_df[['Symbol', 'Market', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Status']],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -225,7 +238,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         if not bottom_df.empty:
             st.subheader("📉 Bottom 5 Performers")
             st.dataframe(
-                bottom_df[['Symbol', 'Market', 'Direction', 'P&L %', 'Max DD %', 'Status']],
+                bottom_df[['Symbol', 'Market', 'Direction', 'Setup', 'P&L %', 'Max DD %', 'Status']],
                 use_container_width=True,
                 hide_index=True,
             )
