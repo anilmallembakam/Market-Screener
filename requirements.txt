@@ -6,3 +6,5 @@ pandas>=2.0.0
 numpy>=1.24.0
 pytz
 nsedt>=0.0.16
+gspread>=6.0.0
+google-auth>=2.20.0

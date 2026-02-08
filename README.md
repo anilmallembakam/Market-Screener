@@ -63,6 +63,7 @@ DailyScreener/
 │   ├── stock_lists.py         # Stock universe definitions
 │   ├── alerts.py              # Alert generation & scoring
 │   ├── alert_history.py       # Alert storage & performance tracking
+│   ├── gsheet_storage.py      # Google Sheets cloud storage
 │   ├── scheduler.py           # Auto-save scheduling
 │   ├── indicators.py          # Technical indicators
 │   ├── patterns.py            # Candlestick pattern detection
@@ -114,11 +115,49 @@ Key settings in `screener/config.py`:
 
 ## Data Storage
 
-- **No database required** - Uses JSON files for alert history
-- **Pickle files** - For cached market data
-- **Fully local** - All data stored in project directory
+### Google Sheets (Recommended for Streamlit Cloud)
 
-### Auto-generated folders:
+For persistent storage on Streamlit Cloud, the app uses Google Sheets:
+
+1. **Create a GCP Service Account:**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select existing
+   - Enable "Google Sheets API" and "Google Drive API"
+   - Go to "IAM & Admin" > "Service Accounts"
+   - Create a service account and download the JSON key
+
+2. **Create a Google Sheet:**
+   - Create a new Google Sheet named "MarketScreenerAlerts"
+   - Share it with your service account email (found in the JSON key)
+   - Copy the spreadsheet ID from the URL
+
+3. **Configure Streamlit Secrets:**
+
+   Create `.streamlit/secrets.toml` locally or add to Streamlit Cloud:
+   ```toml
+   spreadsheet_id = "your-spreadsheet-id-here"
+
+   [gcp_service_account]
+   type = "service_account"
+   project_id = "your-project-id"
+   private_key_id = "your-key-id"
+   private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   client_email = "your-service-account@project.iam.gserviceaccount.com"
+   client_id = "123456789"
+   auth_uri = "https://accounts.google.com/o/oauth2/auth"
+   token_uri = "https://oauth2.googleapis.com/token"
+   auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+   client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/..."
+   ```
+
+4. **For Streamlit Cloud:**
+   - Go to your app dashboard
+   - Click "Settings" > "Secrets"
+   - Paste the contents of your secrets.toml
+
+### Local Storage (Fallback)
+
+If Google Sheets is not configured, the app falls back to local JSON storage:
 - `.data_cache/` - Cached OHLCV data (pickle files)
 - `.alert_history/` - Alert history and scheduler state (JSON files)
 
@@ -139,6 +178,8 @@ This will generate alerts for past trading days and save them to history.
 - `pandas` - Data manipulation
 - `numpy` - Numerical operations
 - `pytz` - Timezone handling
+- `gspread` - Google Sheets API
+- `google-auth` - Google authentication
 
 ## License
 

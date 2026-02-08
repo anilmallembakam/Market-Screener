@@ -1,4 +1,5 @@
-"""Alert history storage and performance tracking."""
+"""Alert history storage and performance tracking.
+Uses Google Sheets for cloud storage with local JSON fallback."""
 import json
 import pandas as pd
 import yfinance as yf
@@ -7,9 +8,18 @@ from pathlib import Path
 from typing import Optional, List, Dict
 import streamlit as st
 
-# Storage path
+# Storage path (fallback)
 _HISTORY_DIR = Path(__file__).resolve().parent.parent / '.alert_history'
 _HISTORY_FILE = _HISTORY_DIR / 'alerts.json'
+
+
+def _use_gsheet() -> bool:
+    """Check if Google Sheets is configured and should be used."""
+    try:
+        from screener.gsheet_storage import is_gsheet_configured
+        return is_gsheet_configured()
+    except Exception:
+        return False
 
 
 def _ensure_dir():
@@ -18,7 +28,16 @@ def _ensure_dir():
 
 
 def load_history() -> List[dict]:
-    """Load alert history from JSON file."""
+    """Load alert history from storage (Google Sheets or local JSON)."""
+    # Try Google Sheets first
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import load_history_gsheet
+            return load_history_gsheet()
+        except Exception as e:
+            st.warning(f"Google Sheets error, falling back to local: {e}")
+
+    # Fallback to local JSON
     if not _HISTORY_FILE.exists():
         return []
     try:
@@ -29,7 +48,7 @@ def load_history() -> List[dict]:
 
 
 def save_history(history: List[dict]) -> None:
-    """Save alert history to JSON file."""
+    """Save alert history to local JSON file (for backup)."""
     _ensure_dir()
     try:
         _HISTORY_FILE.write_text(
@@ -45,21 +64,12 @@ def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], ma
     if alerts_df.empty:
         return 0
 
-    history = load_history()
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # Get existing symbols for today to avoid duplicates
-    existing_today = {
-        (a['symbol'], a['date']) for a in history
-    }
-
-    new_count = 0
+    # Build list of alerts to save
+    alerts_to_save = []
     for _, row in alerts_df.iterrows():
         symbol = row['Symbol']
-        key = (symbol, today)
-
-        if key in existing_today:
-            continue  # Skip duplicate
 
         # Get alert price from daily_data
         alert_price = 0.0
@@ -75,10 +85,31 @@ def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], ma
             'criteria': row.get('Top Criteria', ''),
             'pattern': row.get('Pattern', ''),
             'combo': row.get('Combo', ''),
-            'market': market.lower(),  # 'us' or 'indian'
+            'market': market.lower(),
         }
-        history.append(alert_record)
-        new_count += 1
+        alerts_to_save.append(alert_record)
+
+    # Try Google Sheets first
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import save_alerts_batch_gsheet
+            saved = save_alerts_batch_gsheet(alerts_to_save)
+            if saved > 0:
+                st.success(f"Saved {saved} alerts to Google Sheets!")
+            return saved
+        except Exception as e:
+            st.warning(f"Google Sheets error: {e}. Saving to local file.")
+
+    # Fallback to local JSON
+    history = load_history()
+    existing_keys = {(a['symbol'], a['date']) for a in history}
+
+    new_count = 0
+    for alert in alerts_to_save:
+        key = (alert['symbol'], alert['date'])
+        if key not in existing_keys:
+            history.append(alert)
+            new_count += 1
 
     if new_count > 0:
         save_history(history)
@@ -88,6 +119,15 @@ def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], ma
 
 def get_historical_alerts(days_back: int = 30, market: str = None, direction: str = None) -> pd.DataFrame:
     """Get alerts from the last N days with optional market and direction filters."""
+    # Try Google Sheets first
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import get_historical_alerts_gsheet
+            return get_historical_alerts_gsheet(days_back, market, direction)
+        except Exception:
+            pass
+
+    # Fallback to local
     history = load_history()
     if not history:
         return pd.DataFrame()
@@ -123,6 +163,15 @@ def delete_alert(symbol: str, date: str) -> bool:
 
 def clear_old_alerts(days_to_keep: int = 60) -> int:
     """Remove alerts older than N days. Returns count of removed alerts."""
+    # For Google Sheets
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import delete_old_alerts_gsheet
+            return delete_old_alerts_gsheet(days_to_keep)
+        except Exception:
+            pass
+
+    # Fallback to local
     history = load_history()
     cutoff = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
 
@@ -250,6 +299,15 @@ def _detect_momentum(closes: list, direction: str) -> str:
 
 def get_alerts_by_date(date_str: str, market: str = None) -> pd.DataFrame:
     """Get alerts for a specific date."""
+    # Try Google Sheets first
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import get_alerts_by_date_gsheet
+            return get_alerts_by_date_gsheet(date_str, market)
+        except Exception:
+            pass
+
+    # Fallback to local
     history = load_history()
     if not history:
         return pd.DataFrame()
@@ -281,6 +339,15 @@ def get_alerts_date_range(start_date: str, end_date: str, market: str = None) ->
 
 def get_available_dates() -> list:
     """Get list of all dates that have alerts."""
+    # Try Google Sheets first
+    if _use_gsheet():
+        try:
+            from screener.gsheet_storage import get_available_dates_gsheet
+            return get_available_dates_gsheet()
+        except Exception:
+            pass
+
+    # Fallback to local
     history = load_history()
     if not history:
         return []
