@@ -23,7 +23,9 @@ env/
 
 # App-generated data (auto-generated, don't commit)
 .data_cache/
-.alert_history/
+
+# Keep alert history but ignore scheduler state
+.alert_history/scheduler_state.json
 
 # Jupyter
 .ipynb_checkpoints/
