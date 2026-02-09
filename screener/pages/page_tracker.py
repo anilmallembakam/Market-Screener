@@ -2,8 +2,9 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from typing import Dict
-from datetime import datetime, timedelta
+from typing import Dict, List
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from screener.alert_history import (
     get_historical_alerts,
     fetch_performance_data,
@@ -87,6 +88,67 @@ def _safe_market(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return 'US'
     return str(val).upper()
+
+
+def _process_single_alert(alert_dict: dict, alert_date: str, track_days: int) -> dict:
+    """Process a single alert: fetch performance, earnings, and chart URL.
+    Designed to run in a thread pool for parallel execution."""
+    symbol = alert_dict['symbol']
+    alert_market = _safe_market(alert_dict.get('market', 'us'))
+
+    price_data = _cached_fetch_performance(symbol, alert_date, track_days)
+    perf = calculate_performance(alert_dict, price_data)
+    earnings_info = _get_earnings_date(symbol)
+    chart_url = get_chart_url(symbol)
+
+    display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
+
+    return {
+        'Symbol': display_symbol,
+        'Chart': chart_url,
+        'Market': alert_market,
+        'Alert Date': alert_date,
+        'Direction': alert_dict.get('direction', 'N/A'),
+        'Score': alert_dict.get('score', 0),
+        'Setup': alert_dict.get('combo', 'N/A'),
+        'Criteria': alert_dict.get('criteria', ''),
+        'Earnings': earnings_info,
+        'Alert $': alert_dict.get('alert_price', 0),
+        'Now $': perf['current_price'],
+        'P&L %': perf['pnl_pct'],
+        'Max Gain %': perf['max_gain_pct'],
+        'Max DD %': perf['max_drawdown_pct'],
+        'Days': perf['days_tracked'],
+        'Status': perf['status'],
+        'Momentum': perf['momentum'],
+    }
+
+
+def _process_alerts_parallel(alerts_df: pd.DataFrame, track_days: int, progress_bar=None) -> List[dict]:
+    """Process all alerts in parallel using a thread pool."""
+    total = len(alerts_df)
+    results = [None] * total  # Preserve order
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_idx = {}
+        for idx, (_, alert) in enumerate(alerts_df.iterrows()):
+            alert_dict = alert.to_dict()
+            alert_date = alert_dict['date']
+            future = executor.submit(_process_single_alert, alert_dict, alert_date, track_days)
+            future_to_idx[future] = idx
+
+        completed = 0
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                pass  # Skip failed alerts
+            completed += 1
+            if progress_bar:
+                progress_bar.progress(completed / total, text=f"Processing {completed}/{total}...")
+
+    return [r for r in results if r is not None]
 
 
 def render(daily_data: Dict[str, pd.DataFrame], market: str = 'us'):
@@ -206,51 +268,9 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
 
     st.markdown(f"**{len(alerts_df)} alerts found** from the last {days_back} days")
 
-    # Calculate performance for each alert
-    performance_data = []
-
+    # Calculate performance for each alert (parallel)
     progress_bar = st.progress(0, text="Calculating performance...")
-    total_alerts = len(alerts_df)
-
-    for idx, (_, alert) in enumerate(alerts_df.iterrows()):
-        symbol = alert['symbol']
-        alert_date = alert['date']
-        alert_market = _safe_market(alert.get('market', 'us'))
-
-        # Use cached function for better performance
-        price_data = _cached_fetch_performance(symbol, alert_date, track_days)
-        perf = calculate_performance(alert.to_dict(), price_data)
-
-        # Get earnings info and chart URL
-        earnings_info = _get_earnings_date(symbol)
-        chart_url = get_chart_url(symbol, alert_market)
-
-        # Create display symbol with clean name
-        display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
-
-        performance_data.append({
-            'Symbol': display_symbol,
-            'Chart': chart_url,
-            'Market': alert_market,
-            'Alert Date': alert_date,
-            'Direction': alert.get('direction', 'N/A'),
-            'Score': alert.get('score', 0),
-            'Setup': alert.get('combo', 'N/A'),
-            'Criteria': alert.get('criteria', ''),
-            'Earnings': earnings_info,
-            'Alert $': alert.get('alert_price', 0),
-            'Now $': perf['current_price'],
-            'P&L %': perf['pnl_pct'],
-            'Max Gain %': perf['max_gain_pct'],
-            'Max DD %': perf['max_drawdown_pct'],
-            'Days': perf['days_tracked'],
-            'Status': perf['status'],
-            'Momentum': perf['momentum'],
-        })
-
-        # Update progress
-        progress_bar.progress((idx + 1) / total_alerts, text=f"Processing {idx + 1}/{total_alerts}...")
-
+    performance_data = _process_alerts_parallel(alerts_df, track_days, progress_bar)
     progress_bar.empty()
 
     perf_df = pd.DataFrame(performance_data)
@@ -392,46 +412,9 @@ def _render_calendar_view(market: str):
     st.markdown(f"### Alerts from {date_str}")
     st.caption(f"**{len(alerts_df)} alerts** | Tracking for **{days_since} days**")
 
-    # Calculate performance till today
-    performance_data = []
-
+    # Calculate performance till today (parallel)
     progress_bar = st.progress(0, text="Calculating performance...")
-    total_alerts = len(alerts_df)
-
-    for idx, (_, alert) in enumerate(alerts_df.iterrows()):
-        symbol = alert['symbol']
-        alert_market = _safe_market(alert.get('market', 'us'))
-        price_data = _cached_fetch_performance(symbol, date_str, days_since)
-        perf = calculate_performance(alert.to_dict(), price_data)
-
-        # Get earnings info and chart URL
-        earnings_info = _get_earnings_date(symbol)
-        chart_url = get_chart_url(symbol, alert_market)
-
-        # Create display symbol with clean name
-        display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
-
-        performance_data.append({
-            'Symbol': display_symbol,
-            'Chart': chart_url,
-            'Market': alert_market,
-            'Direction': alert.get('direction', 'N/A'),
-            'Score': alert.get('score', 0),
-            'Criteria': alert.get('criteria', ''),
-            'Earnings': earnings_info,
-            'Alert $': alert.get('alert_price', 0),
-            'Now $': perf['current_price'],
-            'P&L %': perf['pnl_pct'],
-            'Max Gain %': perf['max_gain_pct'],
-            'Max DD %': perf['max_drawdown_pct'],
-            'Days': perf['days_tracked'],
-            'Status': perf['status'],
-            'Momentum': perf['momentum'],
-        })
-
-        # Update progress
-        progress_bar.progress((idx + 1) / total_alerts, text=f"Processing {idx + 1}/{total_alerts}...")
-
+    performance_data = _process_alerts_parallel(alerts_df, days_since, progress_bar)
     progress_bar.empty()
 
     perf_df = pd.DataFrame(performance_data)
@@ -651,27 +634,38 @@ def _render_winner_analytics(market: str):
         st.info("No alerts found for analysis. Save more alerts first!")
         return
 
-    # Calculate performance for all alerts
+    # Calculate performance for all alerts (parallel)
+    def _process_analytics_alert(alert_dict: dict) -> dict:
+        symbol = alert_dict['symbol']
+        alert_date = alert_dict['date']
+        price_data = _cached_fetch_performance(symbol, alert_date, 20)
+        perf = calculate_performance(alert_dict, price_data)
+        return {
+            'symbol': symbol,
+            'date': alert_date,
+            'direction': alert_dict.get('direction', 'N/A'),
+            'score': alert_dict.get('score', 0),
+            'criteria': alert_dict.get('criteria', ''),
+            'pattern': alert_dict.get('pattern', ''),
+            'combo': alert_dict.get('combo', ''),
+            'market': _safe_market(alert_dict.get('market', 'us')),
+            'pnl_pct': perf['pnl_pct'],
+            'max_gain_pct': perf['max_gain_pct'],
+            'status': perf['status'],
+        }
+
     all_performance = []
-
     with st.spinner("Analyzing alerts..."):
-        for _, alert in alerts_df.iterrows():
-            price_data = fetch_performance_data(alert['symbol'], alert['date'], 20)
-            perf = calculate_performance(alert.to_dict(), price_data)
-
-            all_performance.append({
-                'symbol': alert['symbol'],
-                'date': alert['date'],
-                'direction': alert.get('direction', 'N/A'),
-                'score': alert.get('score', 0),
-                'criteria': alert.get('criteria', ''),
-                'pattern': alert.get('pattern', ''),
-                'combo': alert.get('combo', ''),
-                'market': _safe_market(alert.get('market', 'us')),
-                'pnl_pct': perf['pnl_pct'],
-                'max_gain_pct': perf['max_gain_pct'],
-                'status': perf['status'],
-            })
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [
+                executor.submit(_process_analytics_alert, alert.to_dict())
+                for _, alert in alerts_df.iterrows()
+            ]
+            for future in as_completed(futures):
+                try:
+                    all_performance.append(future.result())
+                except Exception:
+                    pass
 
     perf_df = pd.DataFrame(all_performance)
 
