@@ -1,6 +1,7 @@
 """Performance Tracker page - Track historical alerts and their performance."""
 import streamlit as st
 import pandas as pd
+import yfinance as yf
 from typing import Dict
 from datetime import datetime, timedelta
 from screener.alert_history import (
@@ -18,6 +19,67 @@ from screener.scheduler import (
     get_last_auto_save_times,
     is_market_closed,
 )
+from screener.utils import get_chart_url
+
+
+# Cache performance data to avoid repeated API calls
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
+def _cached_fetch_performance(symbol: str, alert_date: str, track_days: int):
+    """Cached wrapper for fetch_performance_data."""
+    return fetch_performance_data(symbol, alert_date, track_days)
+
+
+# Cache earnings data to avoid repeated API calls
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+def _get_earnings_date(symbol: str) -> str:
+    """Get next earnings date for a symbol. Returns days until earnings or empty string."""
+    try:
+        ticker = yf.Ticker(symbol)
+        calendar = ticker.calendar
+
+        if calendar is None or calendar.empty:
+            return ""
+
+        # Get earnings date
+        if 'Earnings Date' in calendar.index:
+            earnings_date = calendar.loc['Earnings Date']
+            if isinstance(earnings_date, pd.Series):
+                earnings_date = earnings_date.iloc[0]
+        elif hasattr(calendar, 'columns') and len(calendar.columns) > 0:
+            # Sometimes calendar is a DataFrame with dates as columns
+            earnings_date = calendar.columns[0]
+        else:
+            return ""
+
+        if pd.isna(earnings_date):
+            return ""
+
+        # Convert to datetime if needed
+        if isinstance(earnings_date, str):
+            earnings_date = pd.to_datetime(earnings_date)
+        elif hasattr(earnings_date, 'to_pydatetime'):
+            earnings_date = earnings_date.to_pydatetime()
+
+        # Calculate days until earnings
+        today = datetime.now()
+        if hasattr(earnings_date, 'tzinfo') and earnings_date.tzinfo is not None:
+            earnings_date = earnings_date.replace(tzinfo=None)
+
+        days_until = (earnings_date - today).days
+
+        # If earnings is within 7 days (past or future), show warning
+        if -7 <= days_until <= 7:
+            if days_until < 0:
+                return f"📅 {days_until}d"  # Past (e.g., -1d, -2d)
+            elif days_until == 0:
+                return "📅 Today!"
+            else:
+                return f"📅 {days_until}d"  # Future (e.g., 1d, 3d)
+        return ""
+    except Exception:
+        return ""
+
+
 
 
 def _safe_market(val) -> str:
@@ -104,7 +166,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
     with col3:
         setup_filter = st.selectbox(
             "Setup",
-            ['All', 'Bull Call Spread', 'Bear Put Spread', 'Iron Condor', 'Long Straddle', 'Calendar Spread'],
+            ['All', 'Trend Following', 'Mean Reversion', 'Breakout', 'Momentum', 'Volatility Squeeze'],
             index=0,
             key='tracker_setup'
         )
@@ -147,30 +209,49 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
     # Calculate performance for each alert
     performance_data = []
 
-    with st.spinner("Calculating performance..."):
-        for _, alert in alerts_df.iterrows():
-            symbol = alert['symbol']
-            alert_date = alert['date']
+    progress_bar = st.progress(0, text="Calculating performance...")
+    total_alerts = len(alerts_df)
 
-            price_data = fetch_performance_data(symbol, alert_date, track_days)
-            perf = calculate_performance(alert.to_dict(), price_data)
+    for idx, (_, alert) in enumerate(alerts_df.iterrows()):
+        symbol = alert['symbol']
+        alert_date = alert['date']
+        alert_market = _safe_market(alert.get('market', 'us'))
 
-            performance_data.append({
-                'Symbol': symbol,
-                'Market': _safe_market(alert.get('market', 'us')),
-                'Alert Date': alert_date,
-                'Direction': alert.get('direction', 'N/A'),
-                'Score': alert.get('score', 0),
-                'Setup': alert.get('combo', 'N/A'),
-                'Alert Price': alert.get('alert_price', 0),
-                'Current Price': perf['current_price'],
-                'P&L %': perf['pnl_pct'],
-                'Max Gain %': perf['max_gain_pct'],
-                'Max DD %': perf['max_drawdown_pct'],
-                'Days': perf['days_tracked'],
-                'Status': perf['status'],
-                'Momentum': perf['momentum'],
-            })
+        # Use cached function for better performance
+        price_data = _cached_fetch_performance(symbol, alert_date, track_days)
+        perf = calculate_performance(alert.to_dict(), price_data)
+
+        # Get earnings info and chart URL
+        earnings_info = _get_earnings_date(symbol)
+        chart_url = get_chart_url(symbol, alert_market)
+
+        # Create display symbol with clean name
+        display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
+
+        performance_data.append({
+            'Symbol': display_symbol,
+            'Chart': chart_url,
+            'Market': alert_market,
+            'Alert Date': alert_date,
+            'Direction': alert.get('direction', 'N/A'),
+            'Score': alert.get('score', 0),
+            'Setup': alert.get('combo', 'N/A'),
+            'Criteria': alert.get('criteria', ''),
+            'Earnings': earnings_info,
+            'Alert $': alert.get('alert_price', 0),
+            'Now $': perf['current_price'],
+            'P&L %': perf['pnl_pct'],
+            'Max Gain %': perf['max_gain_pct'],
+            'Max DD %': perf['max_drawdown_pct'],
+            'Days': perf['days_tracked'],
+            'Status': perf['status'],
+            'Momentum': perf['momentum'],
+        })
+
+        # Update progress
+        progress_bar.progress((idx + 1) / total_alerts, text=f"Processing {idx + 1}/{total_alerts}...")
+
+    progress_bar.empty()
 
     perf_df = pd.DataFrame(performance_data)
 
@@ -215,9 +296,12 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         st.subheader("⚠️ Alerts Losing Steam")
         st.warning(f"{len(losing_steam_df)} alerts are showing weakening momentum - consider exiting")
         st.dataframe(
-            losing_steam_df[['Symbol', 'Market', 'Alert Date', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Days']],
+            losing_steam_df[['Symbol', 'Chart', 'Market', 'Alert Date', 'Direction', 'Setup', 'Earnings', 'P&L %', 'Max Gain %', 'Days']],
             use_container_width=True,
             hide_index=True,
+            column_config={
+                'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+            }
         )
 
     # Top and bottom performers side by side
@@ -228,9 +312,12 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         if not top_df.empty:
             st.subheader("🏆 Top 5 Performers")
             st.dataframe(
-                top_df[['Symbol', 'Market', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Status']],
+                top_df[['Symbol', 'Chart', 'Direction', 'Setup', 'Earnings', 'P&L %', 'Max Gain %', 'Status']],
                 use_container_width=True,
                 hide_index=True,
+                column_config={
+                    'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                }
             )
 
     with col_bottom:
@@ -238,9 +325,12 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         if not bottom_df.empty:
             st.subheader("📉 Bottom 5 Performers")
             st.dataframe(
-                bottom_df[['Symbol', 'Market', 'Direction', 'Setup', 'P&L %', 'Max DD %', 'Status']],
+                bottom_df[['Symbol', 'Chart', 'Direction', 'Setup', 'Earnings', 'P&L %', 'Max DD %', 'Status']],
                 use_container_width=True,
                 hide_index=True,
+                column_config={
+                    'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                }
             )
 
 
@@ -305,26 +395,44 @@ def _render_calendar_view(market: str):
     # Calculate performance till today
     performance_data = []
 
-    with st.spinner("Calculating performance..."):
-        for _, alert in alerts_df.iterrows():
-            symbol = alert['symbol']
-            price_data = fetch_performance_data(symbol, date_str, days_since)
-            perf = calculate_performance(alert.to_dict(), price_data)
+    progress_bar = st.progress(0, text="Calculating performance...")
+    total_alerts = len(alerts_df)
 
-            performance_data.append({
-                'Symbol': symbol,
-                'Market': _safe_market(alert.get('market', 'us')),
-                'Direction': alert.get('direction', 'N/A'),
-                'Score': alert.get('score', 0),
-                'Alert Price': alert.get('alert_price', 0),
-                'Current Price': perf['current_price'],
-                'P&L %': perf['pnl_pct'],
-                'Max Gain %': perf['max_gain_pct'],
-                'Max DD %': perf['max_drawdown_pct'],
-                'Days': perf['days_tracked'],
-                'Status': perf['status'],
-                'Momentum': perf['momentum'],
-            })
+    for idx, (_, alert) in enumerate(alerts_df.iterrows()):
+        symbol = alert['symbol']
+        alert_market = _safe_market(alert.get('market', 'us'))
+        price_data = _cached_fetch_performance(symbol, date_str, days_since)
+        perf = calculate_performance(alert.to_dict(), price_data)
+
+        # Get earnings info and chart URL
+        earnings_info = _get_earnings_date(symbol)
+        chart_url = get_chart_url(symbol, alert_market)
+
+        # Create display symbol with clean name
+        display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
+
+        performance_data.append({
+            'Symbol': display_symbol,
+            'Chart': chart_url,
+            'Market': alert_market,
+            'Direction': alert.get('direction', 'N/A'),
+            'Score': alert.get('score', 0),
+            'Criteria': alert.get('criteria', ''),
+            'Earnings': earnings_info,
+            'Alert $': alert.get('alert_price', 0),
+            'Now $': perf['current_price'],
+            'P&L %': perf['pnl_pct'],
+            'Max Gain %': perf['max_gain_pct'],
+            'Max DD %': perf['max_drawdown_pct'],
+            'Days': perf['days_tracked'],
+            'Status': perf['status'],
+            'Momentum': perf['momentum'],
+        })
+
+        # Update progress
+        progress_bar.progress((idx + 1) / total_alerts, text=f"Processing {idx + 1}/{total_alerts}...")
+
+    progress_bar.empty()
 
     perf_df = pd.DataFrame(performance_data)
 
@@ -510,11 +618,14 @@ def _render_performance_table(perf_df: pd.DataFrame):
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Alert Price': st.column_config.NumberColumn('Alert $', format="%.2f"),
-            'Current Price': st.column_config.NumberColumn('Current $', format="%.2f"),
+            'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+            'Earnings': st.column_config.TextColumn('Earn', width='small'),
+            'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
+            'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
             'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
-            'Max Gain %': st.column_config.NumberColumn('Max Gain', format="%.1f%%"),
-            'Max DD %': st.column_config.NumberColumn('Max DD', format="%.1f%%"),
+            'Max Gain %': st.column_config.NumberColumn('Max %', format="%.1f%%"),
+            'Max DD %': st.column_config.NumberColumn('DD %', format="%.1f%%"),
         }
     )
 

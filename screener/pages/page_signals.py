@@ -15,6 +15,7 @@ from screener.trade_signals import (
 )
 from screener.market_mood import fetch_vix
 from screener.config import NIFTY_STRIKE_STEP, BANKNIFTY_STRIKE_STEP
+from screener.utils import get_chart_url
 
 
 def _render_strategy_card(signal: dict):
@@ -99,10 +100,12 @@ def _render_picks(picks: list, title: str):
         return
 
     for pick in picks:
+        chart_url = get_chart_url(pick['symbol'])
         with st.expander(
             f"{pick['symbol']} | Score: {pick['score']} | "
             f"Close: {pick['close']}"
         ):
+            st.markdown(f"[📈 View Chart]({chart_url})")
             st.markdown(f"**Criteria:** {pick['criteria']}")
             st.markdown(f"**Support:** {pick['support']} | **Resistance:** {pick['resistance']}")
             if pick['direction'] == 'bullish':

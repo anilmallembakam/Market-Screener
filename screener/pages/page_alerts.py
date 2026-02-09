@@ -4,6 +4,7 @@ from urllib.parse import quote
 from typing import Dict
 from screener.alerts import generate_alerts, score_stock, recommend_combo
 from screener.alert_history import save_alerts
+from screener.utils import get_chart_url
 
 
 def _get_unusual_whales_url(symbol: str) -> str:
@@ -62,7 +63,8 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
             else:
                 st.info("All alerts already saved for today.")
 
-    # Add Unusual Whales link column
+    # Add Chart and Option Flow link columns
+    alerts_df['Chart'] = alerts_df['Symbol'].apply(get_chart_url)
     alerts_df['Option Flow'] = alerts_df['Symbol'].apply(_get_unusual_whales_url)
 
     st.dataframe(
@@ -71,6 +73,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
         hide_index=True,
         column_config={
             'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
             'Direction': st.column_config.TextColumn('Direction', width='small'),
             'Score': st.column_config.NumberColumn('Score', width='small'),
             'Bullish': st.column_config.NumberColumn('Bull', width='small'),
@@ -78,7 +81,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
             'Top Criteria': st.column_config.TextColumn('Criteria', width='large'),
             'Pattern': st.column_config.TextColumn('Pattern', width='medium'),
             'Combo': st.column_config.TextColumn('Trading Setup', width='medium'),
-            'Option Flow': st.column_config.LinkColumn('Option Flow', display_text='View Flow'),
+            'Option Flow': st.column_config.LinkColumn('Flow', display_text='🔗', width='small'),
         },
     )
 

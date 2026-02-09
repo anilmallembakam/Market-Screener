@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict
 from screener.breakout_detector import scan_batch
+from screener.utils import get_chart_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
@@ -23,6 +24,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
     if status_filter != "All":
         filtered = filtered[filtered['Status'] == status_filter]
 
+    # Add Chart link column
+    filtered['Chart'] = filtered['Symbol'].apply(get_chart_url)
+
     st.markdown(f"**{len(filtered)} stocks found**")
 
     def color_status(val):
@@ -38,6 +42,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
         filtered.style.map(color_status, subset=['Status']),
         use_container_width=True,
         hide_index=True,
+        column_config={
+            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+        },
     )
 
     # Summary metrics

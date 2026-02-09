@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict
 from screener.candlestick_patterns import CANDLESTICK_PATTERNS, scan_batch
+from screener.utils import get_chart_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
@@ -32,6 +33,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
 
         st.markdown(f"**{len(results)} signals found**")
 
+        # Add Chart link column
+        results['Chart'] = results['Symbol'].apply(get_chart_url)
+
         def color_signal(val):
             if val == 'bullish':
                 return 'background-color: #1b5e20; color: white'
@@ -43,6 +47,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
             results.style.map(color_signal, subset=['Signal']),
             use_container_width=True,
             hide_index=True,
+            column_config={
+                'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+            },
         )
 
         # Summary counts

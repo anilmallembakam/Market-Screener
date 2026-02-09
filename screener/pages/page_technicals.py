@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict
 from screener.technical_indicators import batch_summary, compute_all, generate_signals
+from screener.utils import get_chart_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
@@ -40,6 +41,10 @@ def render(daily_data: Dict[str, pd.DataFrame]):
 
     st.markdown(f"**{len(filtered)} stocks** (filtered from {len(summary)})")
 
+    # Add Chart link column
+    filtered = filtered.copy()
+    filtered['Chart'] = filtered['Symbol'].apply(get_chart_url)
+
     def highlight_rsi(val):
         if pd.isna(val):
             return ''
@@ -59,7 +64,14 @@ def render(daily_data: Dict[str, pd.DataFrame]):
     styled = filtered.style.map(highlight_rsi, subset=['RSI'])
     styled = styled.map(highlight_ema, subset=['EMA_Trend', 'MACD'])
 
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+        },
+    )
 
     # Detail view
     st.subheader("Stock Detail")
