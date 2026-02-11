@@ -132,7 +132,7 @@ render_mood_panel(daily_data, market.lower(), index_symbol)
 
 # --- Tabs ---
 (tab_alerts, tab_scanner, tab_technicals, tab_breakouts,
- tab_sr, tab_fo, tab_signals, tab_chart, tab_backtest, tab_tracker, tab_guide) = st.tabs([
+ tab_sr, tab_fo, tab_signals, tab_chart, tab_backtest, tab_tracker, tab_watchlist, tab_guide) = st.tabs([
     "Alerts/Summary",
     "Pattern Scanner",
     "Technicals",
@@ -143,6 +143,7 @@ render_mood_panel(daily_data, market.lower(), index_symbol)
     "Chart",
     "Backtest",
     "📊 Tracker",
+    "⭐ Watchlist",
     "\U0001F4DA Guide",
 ])
 
@@ -185,6 +186,10 @@ with tab_backtest:
 with tab_tracker:
     from screener.pages.page_tracker import render as render_tracker
     render_tracker(daily_data, market.lower())
+
+with tab_watchlist:
+    from screener.pages.page_watchlist import render as render_watchlist
+    render_watchlist(daily_data, market.lower())
 
 with tab_guide:
     from screener.pages.page_guide import render as render_guide

@@ -5,6 +5,7 @@ from typing import Dict
 from screener.alerts import generate_alerts, score_stock, recommend_combo
 from screener.alert_history import save_alerts
 from screener.utils import get_chart_url
+from screener.watchlist_store import add_to_watchlist, is_in_watchlist
 
 
 def _get_unusual_whales_url(symbol: str) -> str:
@@ -85,7 +86,41 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
         },
     )
 
+    # Bulk Add to Watchlist
     st.subheader("Detail View")
+    all_symbols = alerts_df['Symbol'].tolist()
+    wl_selected = st.multiselect(
+        "Select stocks to add to watchlist",
+        options=all_symbols,
+        key='wl_bulk_select'
+    )
+    if wl_selected and st.button("⭐ Add Selected to Watchlist", key='wl_bulk_add'):
+        added = 0
+        skipped = 0
+        for sym in wl_selected:
+            row_data = alerts_df[alerts_df['Symbol'] == sym].iloc[0]
+            alert_price = 0.0
+            if sym in daily_data and not daily_data[sym].empty:
+                alert_price = float(daily_data[sym]['Close'].iloc[-1])
+            ok = add_to_watchlist(
+                symbol=sym,
+                direction=row_data['Direction'],
+                score=int(row_data['Score']),
+                alert_price=alert_price,
+                criteria=row_data.get('Top Criteria', ''),
+                pattern=row_data.get('Pattern', ''),
+                combo=row_data.get('Combo', ''),
+                market=market,
+            )
+            if ok:
+                added += 1
+            else:
+                skipped += 1
+        if added:
+            st.toast(f"Added {added} stock(s) to watchlist!")
+        if skipped:
+            st.toast(f"{skipped} stock(s) already in watchlist")
+
     for _, row in alerts_df.head(20).iterrows():
         with st.expander(f"{row['Symbol']} - {row['Direction']} (Score: {row['Score']})"):
             if row['Symbol'] not in daily_data:
@@ -134,3 +169,27 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
             st.markdown("---")
             uw_url = _get_unusual_whales_url(row['Symbol'])
             st.markdown(f"**Option Flow:** [View on Unusual Whales]({uw_url})")
+
+            # Add to Watchlist button
+            btn_key = f"wl_add_{row['Symbol']}"
+            if is_in_watchlist(row['Symbol']):
+                st.caption("⭐ Already in watchlist")
+            elif st.button("⭐ Add to Watchlist", key=btn_key):
+                alert_price = 0.0
+                if row['Symbol'] in daily_data and not daily_data[row['Symbol']].empty:
+                    alert_price = float(daily_data[row['Symbol']]['Close'].iloc[-1])
+                ok = add_to_watchlist(
+                    symbol=row['Symbol'],
+                    direction=row['Direction'],
+                    score=int(row['Score']),
+                    alert_price=alert_price,
+                    criteria=row.get('Top Criteria', ''),
+                    pattern=row.get('Pattern', ''),
+                    combo=row.get('Combo', ''),
+                    market=market,
+                )
+                if ok:
+                    st.toast(f"Added {row['Symbol']} to watchlist!")
+                    st.rerun()
+                else:
+                    st.toast(f"{row['Symbol']} is already in watchlist")

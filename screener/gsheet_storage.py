@@ -18,6 +18,7 @@ SCOPES = [
 # Sheet names
 ALERTS_SHEET = "alerts"
 SCHEDULER_SHEET = "scheduler_state"
+WATCHLIST_SHEET = "watchlist"
 
 
 @st.cache_resource
@@ -242,4 +243,88 @@ def is_gsheet_configured() -> bool:
     try:
         return "gcp_service_account" in st.secrets
     except Exception:
+        return False
+
+
+# --- Watchlist Google Sheets Functions ---
+
+def get_watchlist_worksheet():
+    """Get the watchlist worksheet, creating it if needed."""
+    spreadsheet = get_spreadsheet()
+    if not spreadsheet:
+        return None
+
+    try:
+        return spreadsheet.worksheet(WATCHLIST_SHEET)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=WATCHLIST_SHEET, rows=1000, cols=15)
+        ws.append_row([
+            'symbol', 'date_added', 'direction', 'score', 'alert_price',
+            'criteria', 'pattern', 'combo', 'market', 'notes', 'created_at'
+        ])
+        return ws
+
+
+def load_watchlist_gsheet() -> List[dict]:
+    """Load all watchlist items from Google Sheets."""
+    ws = get_watchlist_worksheet()
+    if not ws:
+        return []
+
+    try:
+        records = ws.get_all_records()
+        return records
+    except Exception as e:
+        st.warning(f"Error loading watchlist from Google Sheets: {e}")
+        return []
+
+
+def save_watchlist_item_gsheet(item: dict) -> bool:
+    """Save a single watchlist item. Skips if symbol already exists."""
+    ws = get_watchlist_worksheet()
+    if not ws:
+        return False
+
+    try:
+        # Check for duplicate by symbol
+        existing = ws.get_all_records()
+        existing_symbols = {r.get('symbol', '') for r in existing}
+        if item.get('symbol', '') in existing_symbols:
+            return False  # Already in watchlist
+
+        row = [
+            item.get('symbol', ''),
+            item.get('date_added', ''),
+            item.get('direction', ''),
+            item.get('score', 0),
+            item.get('alert_price', 0),
+            item.get('criteria', ''),
+            item.get('pattern', ''),
+            item.get('combo', ''),
+            item.get('market', 'us'),
+            item.get('notes', ''),
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        ]
+        ws.append_row(row)
+        return True
+    except Exception as e:
+        st.warning(f"Error saving watchlist item to Google Sheets: {e}")
+        return False
+
+
+def remove_watchlist_item_gsheet(symbol: str) -> bool:
+    """Remove a stock from the watchlist by symbol."""
+    ws = get_watchlist_worksheet()
+    if not ws:
+        return False
+
+    try:
+        records = ws.get_all_records()
+        for i, record in enumerate(records, start=2):  # Row 1 is header
+            if record.get('symbol', '') == symbol:
+                ws.delete_rows(i)
+                return True
+        return False
+    except Exception as e:
+        st.warning(f"Error removing watchlist item from Google Sheets: {e}")
         return False
