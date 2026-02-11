@@ -21,6 +21,7 @@ from screener.scheduler import (
     is_market_closed,
 )
 from screener.utils import get_chart_url
+from screener.watchlist_store import add_to_watchlist
 
 
 # Cache performance data to avoid repeated API calls
@@ -121,6 +122,8 @@ def _process_single_alert(alert_dict: dict, alert_date: str, track_days: int) ->
         'Days': perf['days_tracked'],
         'Status': perf['status'],
         'Momentum': perf['momentum'],
+        '_raw_symbol': symbol,
+        '_pattern': alert_dict.get('pattern', ''),
     }
 
 
@@ -308,7 +311,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         filtered_df = filtered_df[filtered_df['Momentum'].isin(momentum_filter)]
 
     # Display table with styling
-    _render_performance_table(filtered_df)
+    _render_performance_table(filtered_df, key='tracker_perf')
 
     # Alerts losing steam section
     losing_steam_df = perf_df[perf_df['Momentum'] == 'Losing Steam']
@@ -424,7 +427,7 @@ def _render_calendar_view(market: str):
         _render_summary_metrics(perf_df)
 
         # Performance table
-        _render_performance_table(perf_df)
+        _render_performance_table(perf_df, key='calendar_perf')
 
 
 def _render_weekly_summary(market: str):
@@ -570,8 +573,8 @@ def _render_summary_metrics(perf_df: pd.DataFrame):
         st.metric("Losing Steam", losing_steam, delta="Watch" if losing_steam > 0 else None, delta_color="off")
 
 
-def _render_performance_table(perf_df: pd.DataFrame):
-    """Render styled performance dataframe."""
+def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table'):
+    """Render styled performance dataframe with row selection for watchlist."""
     # Style functions
     def color_pnl(val):
         if val >= 5:
@@ -594,12 +597,20 @@ def _render_performance_table(perf_df: pd.DataFrame):
             return 'background-color: #b71c1c; color: white'
         return ''
 
-    st.dataframe(
-        perf_df.style
+    # Filter out internal columns from display
+    display_cols = [c for c in perf_df.columns if not c.startswith('_')]
+    display_df = perf_df[display_cols]
+
+    st.caption("Select rows to add to watchlist")
+    event = st.dataframe(
+        display_df.style
             .applymap(color_pnl, subset=['P&L %'])
             .applymap(color_momentum, subset=['Momentum']),
         use_container_width=True,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="multi-row",
+        key=key,
         column_config={
             'Symbol': st.column_config.TextColumn('Symbol', width='small'),
             'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
@@ -611,6 +622,34 @@ def _render_performance_table(perf_df: pd.DataFrame):
             'Max DD %': st.column_config.NumberColumn('DD %', format="%.1f%%"),
         }
     )
+
+    # Add selected rows to Watchlist
+    selected_rows = event.selection.rows
+    if selected_rows:
+        if st.button(f"⭐ Add {len(selected_rows)} to Watchlist", key=f'{key}_wl_btn'):
+            added = 0
+            skipped = 0
+            for idx in selected_rows:
+                row = perf_df.iloc[idx]
+                raw_sym = row.get('_raw_symbol', row['Symbol'])
+                ok = add_to_watchlist(
+                    symbol=raw_sym,
+                    direction=row['Direction'],
+                    score=int(row['Score']),
+                    alert_price=float(row.get('Alert $', 0)),
+                    criteria=row.get('Criteria', ''),
+                    pattern=row.get('_pattern', ''),
+                    combo=row.get('Setup', ''),
+                    market=row.get('Market', 'US').lower(),
+                )
+                if ok:
+                    added += 1
+                else:
+                    skipped += 1
+            if added:
+                st.toast(f"Added {added} stock(s) to watchlist!")
+            if skipped:
+                st.toast(f"{skipped} stock(s) already in watchlist")
 
 
 def _render_winner_analytics(market: str):
