@@ -20,8 +20,11 @@ from screener.scheduler import (
     get_last_auto_save_times,
     is_market_closed,
 )
+from screener.alerts import detect_entry_signal
+from screener.alert_history import compute_signal_performance
+from screener.db import db_save_entry_signals, db_load_active_entry_signals, db_update_entry_signal_status
 from screener.utils import get_chart_url
-from screener.watchlist_store import add_to_watchlist
+from screener.watchlist_store import add_to_watchlist, is_in_watchlist, get_watchlist_symbols
 
 
 # Cache performance data to avoid repeated API calls
@@ -154,27 +157,165 @@ def _process_alerts_parallel(alerts_df: pd.DataFrame, track_days: int, progress_
     return [r for r in results if r is not None]
 
 
+def _scan_entry_signals(symbols: list, daily_data: Dict[str, pd.DataFrame],
+                        setup_map: dict = None) -> tuple:
+    """Scan symbols for Trend Following entry signals (bullish + bearish).
+
+    Returns (signals_list, skipped_count) where signals_list contains
+    only items with has_signal=True, sorted by strength.
+    setup_map is an optional {raw_symbol: setup_name} dict.
+    """
+    if setup_map is None:
+        setup_map = {}
+    signals = []
+    skipped = 0
+    seen = set()
+    for sym in symbols:
+        if sym in seen:
+            continue
+        seen.add(sym)
+        if sym not in daily_data:
+            skipped += 1
+            continue
+        results = detect_entry_signal(daily_data[sym], strategy='trend_following')
+        for result in results:
+            display_sym = sym.replace('.NS', '') if sym.endswith('.NS') else sym
+            result['symbol'] = display_sym
+            result['_raw_symbol'] = sym
+            result['chart_url'] = get_chart_url(sym)
+            result['setup'] = setup_map.get(sym, '')
+            signals.append(result)
+
+    # Sort: Strong first, then Moderate; within same strength bullish first
+    strength_order = {'Strong': 0, 'Moderate': 1}
+    dir_order = {'Bullish': 0, 'Bearish': 1}
+    signals.sort(key=lambda s: (strength_order.get(s['strength'], 9), dir_order.get(s['direction'], 9)))
+    return signals, skipped
+
+
+def _build_entry_signals_df(signals: list) -> pd.DataFrame:
+    """Convert entry signal dicts into a display DataFrame."""
+    rows = []
+    for sig in signals:
+        d = sig['details']
+        rows.append({
+            'Symbol': sig['symbol'],
+            'Chart': sig.get('chart_url', ''),
+            'Direction': sig.get('direction', ''),
+            'Setup': sig.get('setup', ''),
+            'Strength': sig['strength'],
+            'Entry $': sig['entry_price'],
+            'EMA20': sig['ema20'],
+            'Pullback %': sig['pullback_pct'],
+            'Stop $': sig['stop_loss'],
+            'Target 1': sig['target_1'],
+            'Target 2': sig['target_2'],
+            'Risk %': sig['risk_pct'],
+            'ADX': d.get('adx') if d.get('adx') is not None else 0,
+            'RSI': d.get('rsi') if d.get('rsi') is not None else 0,
+            'Vol Ratio': d.get('volume_ratio') if d.get('volume_ratio') is not None else 0,
+            'Conditions': ', '.join(sig['conditions_met']),
+            'Missing': ', '.join(sig['conditions_missing']),
+        })
+    return pd.DataFrame(rows)
+
+
+def _render_entry_signals(signals: list, skipped_count: int, key_prefix: str):
+    """Render entry signals in a tabular format."""
+    total = len(signals)
+    strong = sum(1 for s in signals if s['strength'] == 'Strong')
+    moderate = total - strong
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Entry Signals", total)
+    with col2:
+        st.metric("Strong", strong)
+    with col3:
+        st.metric("Moderate", moderate)
+    with col4:
+        if skipped_count > 0:
+            st.metric("Skipped", skipped_count, help="Stocks not in current data (different market?)")
+
+    # Build and display table
+    sig_df = _build_entry_signals_df(signals)
+
+    def color_strength(val):
+        if val == 'Strong':
+            return 'background-color: #1b5e20; color: white'
+        elif val == 'Moderate':
+            return 'background-color: #ff8f00; color: black'
+        return ''
+
+    def color_direction(val):
+        if val == 'Bullish':
+            return 'background-color: #1b5e20; color: white'
+        elif val == 'Bearish':
+            return 'background-color: #b71c1c; color: white'
+        return ''
+
+    col_order = [
+        'Symbol', 'Chart', 'Direction', 'Setup', 'Strength',
+        'Entry $', 'EMA20', 'Pullback %',
+        'Stop $', 'Target 1', 'Target 2', 'Risk %',
+        'ADX', 'RSI', 'Vol Ratio', 'Conditions', 'Missing',
+    ]
+
+    st.dataframe(
+        sig_df.style
+            .applymap(color_strength, subset=['Strength'])
+            .applymap(color_direction, subset=['Direction']),
+        use_container_width=True,
+        hide_index=True,
+        column_order=col_order,
+        column_config={
+            'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+            'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+            'Direction': st.column_config.TextColumn('Direction', width='small'),
+            'Setup': st.column_config.TextColumn('Setup', width='small'),
+            'Strength': st.column_config.TextColumn('Signal', width='small'),
+            'Entry $': st.column_config.NumberColumn('Entry $', format="%.2f"),
+            'EMA20': st.column_config.NumberColumn('EMA20', format="%.2f"),
+            'Pullback %': st.column_config.NumberColumn('Pullback %', format="%.1f%%"),
+            'Stop $': st.column_config.NumberColumn('Stop $', format="%.2f"),
+            'Target 1': st.column_config.NumberColumn('T1 (2:1)', format="%.2f"),
+            'Target 2': st.column_config.NumberColumn('T2 (3:1)', format="%.2f"),
+            'Risk %': st.column_config.NumberColumn('Risk %', format="%.1f%%"),
+            'ADX': st.column_config.NumberColumn('ADX', format="%.0f"),
+            'RSI': st.column_config.NumberColumn('RSI', format="%.0f"),
+            'Vol Ratio': st.column_config.NumberColumn('Vol', format="%.1fx"),
+            'Conditions': st.column_config.TextColumn('Conditions Met', width='large'),
+            'Missing': st.column_config.TextColumn('Missing', width='medium'),
+        },
+    )
+
+
 def render(daily_data: Dict[str, pd.DataFrame], market: str = 'us'):
     st.header("📊 Performance Tracker")
 
     # Sub-tabs for different views
-    sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs([
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5 = st.tabs([
         "📈 Live Tracker",
+        "🎯 Entry Signals",
         "📅 Calendar View",
         "📊 Weekly Summary",
-        "🔍 Winner Analytics"
+        "🔍 Winner Analytics",
     ])
 
     with sub_tab1:
         _render_live_tracker(daily_data, market)
 
     with sub_tab2:
-        _render_calendar_view(market)
+        _render_entry_signals_tab(daily_data, market)
 
     with sub_tab3:
-        _render_weekly_summary(market)
+        _render_calendar_view(market)
 
     with sub_tab4:
+        _render_weekly_summary(market)
+
+    with sub_tab5:
         _render_winner_analytics(market)
 
 
@@ -355,6 +496,253 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
                     'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
                 }
             )
+
+
+def _render_entry_signals_tab(daily_data: Dict[str, pd.DataFrame], market: str):
+    """Entry Signals tab — saved signals from DB + live scan for new ones."""
+
+    # ── Section A: Saved Signals (from DB) ─────────────────────────────
+    st.subheader("Saved Entry Signals")
+    st.caption("Loaded from database — persists across sessions")
+
+    saved = db_load_active_entry_signals(source='Tracker')
+
+    if saved:
+        _render_tracker_saved_signals(saved, daily_data, key_prefix='tracker_saved')
+    else:
+        st.info("No saved entry signals yet. Scan below and save new ones.")
+
+    st.markdown("---")
+
+    # ── Section B: New Signals Detected (live scan) ────────────────────
+    st.subheader("New Signals Detected")
+    st.caption("Live scan of tracked stocks — save to track performance")
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        days_back = st.selectbox(
+            "Scan alerts from last",
+            [7, 14, 30, 60],
+            index=2,
+            key='entry_sig_days'
+        )
+
+    # Load tracked symbols
+    market_query = market if market != 'all' else None
+    alerts_df = get_historical_alerts(days_back, market=market_query)
+
+    if alerts_df.empty:
+        st.info("No tracked alerts found. Save alerts from the Alerts tab first.")
+        return
+
+    # Build symbol -> setup mapping from historical alerts
+    tracker_symbols = alerts_df['symbol'].unique().tolist()
+    setup_map = {}
+    for _, row in alerts_df.iterrows():
+        sym = row.get('symbol', '')
+        if sym and sym not in setup_map:
+            setup_map[sym] = row.get('combo', '')
+
+    st.markdown(f"Scanning **{len(tracker_symbols)}** unique symbols from {len(alerts_df)} alerts...")
+
+    with st.spinner("Scanning for entry signals..."):
+        entry_signals, entry_skipped = _scan_entry_signals(tracker_symbols, daily_data, setup_map)
+
+    # Filter out signals already saved (same symbol + today + direction)
+    today = datetime.now().strftime('%Y-%m-%d')
+    saved_keys = {(s['symbol'], s['signal_date'], s['direction']) for s in saved}
+    new_signals = [
+        s for s in entry_signals
+        if (s['_raw_symbol'], today, s.get('direction', '')) not in saved_keys
+    ]
+
+    if new_signals:
+        _render_entry_signals(new_signals, entry_skipped, key_prefix='tracker_entry')
+
+        # Build labels for multiselect
+        signal_labels = [
+            f"{s['symbol']} ({s.get('direction', '?')}, {s.get('strength', '?')})"
+            for s in new_signals
+        ]
+        selected_labels = st.multiselect(
+            "Select signals to save",
+            options=signal_labels,
+            default=signal_labels,
+            key='tracker_select_signals'
+        )
+
+        col_save1, col_save2, _ = st.columns([1, 1, 2])
+        with col_save1:
+            save_selected = st.button("Save Selected", key='tracker_save_selected_btn',
+                                       disabled=len(selected_labels) == 0)
+        with col_save2:
+            save_all = st.button("Save All", key='tracker_save_all_btn')
+
+        signals_to_save = new_signals if save_all else [
+            sig for sig, lbl in zip(new_signals, signal_labels) if lbl in selected_labels
+        ] if save_selected else []
+
+        if signals_to_save:
+            to_save = []
+            for sig in signals_to_save:
+                d = sig.get('details', {})
+                to_save.append({
+                    'symbol': sig['_raw_symbol'],
+                    'signal_date': today,
+                    'direction': sig.get('direction', ''),
+                    'strategy': sig.get('strategy', 'Trend Following'),
+                    'strength': sig.get('strength', 'Moderate'),
+                    'setup': sig.get('setup', ''),
+                    'entry_price': sig['entry_price'],
+                    'ema20': sig['ema20'],
+                    'stop_loss': sig['stop_loss'],
+                    'target_1': sig['target_1'],
+                    'target_2': sig['target_2'],
+                    'risk_pct': sig['risk_pct'],
+                    'pullback_pct': sig['pullback_pct'],
+                    'adx': d.get('adx'),
+                    'rsi': d.get('rsi'),
+                    'volume_ratio': d.get('volume_ratio'),
+                    'atr': d.get('atr'),
+                    'conditions_met': ', '.join(sig.get('conditions_met', [])),
+                    'conditions_missing': ', '.join(sig.get('conditions_missing', [])),
+                    'source': 'Tracker',
+                    'market': market.lower(),
+                    'status': 'Active',
+                })
+            count = db_save_entry_signals(to_save)
+            if count > 0:
+                st.success(f"Saved {count} new entry signal(s)")
+                st.rerun()
+            else:
+                st.info("Signals already saved (duplicate date/symbol/direction)")
+    else:
+        msg = "No new entry signals detected."
+        if entry_skipped > 0:
+            msg += f" ({entry_skipped} stocks skipped — not in current market data)"
+        st.info(msg)
+
+
+def _render_tracker_saved_signals(saved: list, daily_data: Dict[str, pd.DataFrame],
+                                   key_prefix: str):
+    """Render saved entry signals table with live performance data (Tracker)."""
+    rows = []
+    for sig in saved:
+        raw_sym = sig['symbol']
+        display_sym = raw_sym.replace('.NS', '') if raw_sym.endswith('.NS') else raw_sym
+
+        # Get current price from daily_data
+        if raw_sym in daily_data and not daily_data[raw_sym].empty:
+            current_price = float(daily_data[raw_sym]['Close'].iloc[-1])
+        else:
+            current_price = sig['entry_price']
+
+        perf = compute_signal_performance(sig, current_price)
+
+        rows.append({
+            '_id': sig['id'],
+            'Symbol': display_sym,
+            'Chart': get_chart_url(raw_sym),
+            'Direction': sig['direction'],
+            'Setup': sig.get('setup', ''),
+            'Strength': sig['strength'],
+            'Signal Date': sig['signal_date'],
+            'Days Held': perf['days_held'],
+            'Entry $': sig['entry_price'],
+            'Now $': perf['current_price'],
+            'P&L %': perf['pnl_pct'],
+            'Stop $': sig['stop_loss'],
+            'T1 (2:1)': sig['target_1'],
+            'T2 (3:1)': sig['target_2'],
+            'Risk %': sig['risk_pct'],
+            'Status': perf['status_hint'],
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Summary metrics
+    total = len(df)
+    active = len(df[df['Status'] == 'Active'])
+    winners = len(df[df['P&L %'] > 0])
+    avg_pnl = df['P&L %'].mean() if total > 0 else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Total Signals", total)
+    with c2:
+        st.metric("Active", active)
+    with c3:
+        st.metric("Profitable", winners)
+    with c4:
+        st.metric("Avg P&L", f"{avg_pnl:.1f}%")
+
+    def color_pnl(val):
+        if val >= 5:
+            return 'background-color: #1b5e20; color: white'
+        elif val >= 0:
+            return 'background-color: #2e7d32; color: white'
+        elif val >= -5:
+            return 'background-color: #ff8f00; color: black'
+        else:
+            return 'background-color: #b71c1c; color: white'
+
+    def color_status(val):
+        if val == 'Target Hit':
+            return 'background-color: #1b5e20; color: white'
+        elif val == 'Stopped Out':
+            return 'background-color: #b71c1c; color: white'
+        elif val == 'Active':
+            return 'background-color: #1565c0; color: white'
+        return ''
+
+    display_cols = [c for c in df.columns if c != '_id']
+
+    st.dataframe(
+        df[display_cols].style
+            .applymap(color_pnl, subset=['P&L %'])
+            .applymap(color_status, subset=['Status']),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+            'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+            'Direction': st.column_config.TextColumn('Dir', width='small'),
+            'Setup': st.column_config.TextColumn('Setup', width='small'),
+            'Strength': st.column_config.TextColumn('Signal', width='small'),
+            'Signal Date': st.column_config.TextColumn('Triggered', width='small'),
+            'Days Held': st.column_config.NumberColumn('Days', format="%d"),
+            'Entry $': st.column_config.NumberColumn('Entry $', format="%.2f"),
+            'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
+            'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
+            'Stop $': st.column_config.NumberColumn('Stop $', format="%.2f"),
+            'T1 (2:1)': st.column_config.NumberColumn('T1', format="%.2f"),
+            'T2 (3:1)': st.column_config.NumberColumn('T2', format="%.2f"),
+            'Risk %': st.column_config.NumberColumn('Risk %', format="%.1f%%"),
+            'Status': st.column_config.TextColumn('Status', width='small'),
+        },
+    )
+
+    # Close signals management
+    options = [f"{row['Symbol']} ({row['Direction']}, {row['Signal Date']})" for _, row in df.iterrows()]
+    id_list = df['_id'].tolist()
+
+    to_close = st.multiselect("Select signals to close", options=options, key=f'{key_prefix}_close')
+
+    if to_close and st.button("Close Selected", key=f'{key_prefix}_close_btn'):
+        closed = 0
+        for label in to_close:
+            idx = options.index(label)
+            sig_id = id_list[idx]
+            now_price = df.iloc[idx]['Now $']
+            if db_update_entry_signal_status(
+                sig_id, 'Closed',
+                exit_price=now_price,
+                exit_date=datetime.now().strftime('%Y-%m-%d')
+            ):
+                closed += 1
+        if closed > 0:
+            st.success(f"Closed {closed} signal(s)")
+            st.rerun()
 
 
 def _render_calendar_view(market: str):
@@ -573,8 +961,8 @@ def _render_summary_metrics(perf_df: pd.DataFrame):
         st.metric("Losing Steam", losing_steam, delta="Watch" if losing_steam > 0 else None, delta_color="off")
 
 
-def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table'):
-    """Render styled performance dataframe with row selection for watchlist."""
+def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', editable: bool = True):
+    """Render styled performance dataframe with optional checkbox for watchlist."""
     # Style functions
     def color_pnl(val):
         if val >= 5:
@@ -599,57 +987,108 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table'):
 
     # Filter out internal columns from display
     display_cols = [c for c in perf_df.columns if not c.startswith('_')]
-    display_df = perf_df[display_cols]
 
-    st.caption("Select rows to add to watchlist")
-    event = st.dataframe(
-        display_df.style
-            .applymap(color_pnl, subset=['P&L %'])
-            .applymap(color_momentum, subset=['Momentum']),
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="multi-row",
-        key=key,
-        column_config={
-            'Symbol': st.column_config.TextColumn('Symbol', width='small'),
-            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
-            'Earnings': st.column_config.TextColumn('Earn', width='small'),
-            'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
-            'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
-            'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
-            'Max Gain %': st.column_config.NumberColumn('Max %', format="%.1f%%"),
-            'Max DD %': st.column_config.NumberColumn('DD %', format="%.1f%%"),
-        }
-    )
+    if editable:
+        # Add checkbox column for watchlist selection (single load for efficiency)
+        wl_symbols = get_watchlist_symbols()
+        edit_df = perf_df[display_cols].copy()
+        # Build a mapping from display symbol to raw symbol for WL check
+        raw_sym_map = {}
+        if '_raw_symbol' in perf_df.columns:
+            for i, row in perf_df.iterrows():
+                raw_sym_map[row['Symbol']] = row['_raw_symbol']
+        edit_df.insert(0, 'Add to WL', edit_df['Symbol'].apply(
+            lambda s: raw_sym_map.get(s, s) in wl_symbols
+        ))
 
-    # Add selected rows to Watchlist
-    selected_rows = event.selection.rows
-    if selected_rows:
-        if st.button(f"⭐ Add {len(selected_rows)} to Watchlist", key=f'{key}_wl_btn'):
+        # Column order: WL, Symbol, Chart first, then the rest
+        tracker_col_order = [
+            'Add to WL', 'Symbol', 'Chart',
+            'Market', 'Alert Date', 'Direction', 'Score', 'Setup', 'Criteria',
+            'Earnings', 'Alert $', 'Now $', 'P&L %', 'Max Gain %', 'Max DD %',
+            'Days', 'Status', 'Momentum',
+        ]
+
+        st.caption("Tick the checkbox to select stocks, then click **Add to Watchlist** below")
+        edited_df = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            hide_index=True,
+            key=key,
+            column_order=tracker_col_order,
+            disabled=[c for c in edit_df.columns if c != 'Add to WL'],
+            column_config={
+                'Add to WL': st.column_config.CheckboxColumn('WL', width='small', help='Select to add to watchlist'),
+                'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+                'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+                'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
+                'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
+                'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
+                'Max Gain %': st.column_config.NumberColumn('Max %', format="%.1f%%"),
+                'Max DD %': st.column_config.NumberColumn('DD %', format="%.1f%%"),
+            }
+        )
+
+        # Add to watchlist button
+        if st.button("Add Selected to Watchlist", key=f'{key}_wl_btn', help="Add all checked stocks to your watchlist"):
             added = 0
             skipped = 0
-            for idx in selected_rows:
-                row = perf_df.iloc[idx]
-                raw_sym = row.get('_raw_symbol', row['Symbol'])
-                ok = add_to_watchlist(
-                    symbol=raw_sym,
-                    direction=row['Direction'],
-                    score=int(row['Score']),
-                    alert_price=float(row.get('Alert $', 0)),
-                    criteria=row.get('Criteria', ''),
-                    pattern=row.get('_pattern', ''),
-                    combo=row.get('Setup', ''),
-                    market=row.get('Market', 'US').lower(),
-                )
-                if ok:
-                    added += 1
-                else:
-                    skipped += 1
-            if added:
-                st.toast(f"Added {added} stock(s) to watchlist!")
-            if skipped:
-                st.toast(f"{skipped} stock(s) already in watchlist")
+            for idx, row in edited_df.iterrows():
+                if row['Add to WL']:
+                    # Get the raw symbol from perf_df
+                    raw_sym = perf_df.iloc[idx].get('_raw_symbol', row['Symbol'])
+                    if is_in_watchlist(raw_sym):
+                        continue
+                    alert_date = row.get('Alert Date', datetime.now().strftime('%Y-%m-%d'))
+                    ok = add_to_watchlist(
+                        symbol=raw_sym,
+                        direction=row['Direction'],
+                        score=int(row['Score']),
+                        alert_price=float(row.get('Alert $', 0)),
+                        criteria=row.get('Criteria', ''),
+                        pattern=perf_df.iloc[idx].get('_pattern', ''),
+                        combo=row.get('Setup', ''),
+                        market=row.get('Market', 'US').lower(),
+                        alert_date=alert_date,
+                    )
+                    if ok:
+                        added += 1
+                    else:
+                        skipped += 1
+            if added > 0:
+                st.success(f"Added {added} stock(s) to watchlist!")
+                st.rerun()
+            elif skipped > 0:
+                st.info("Selected stocks are already in watchlist")
+            else:
+                st.warning("No new stocks selected. Tick the checkboxes first.")
+    else:
+        # Non-editable display (for weekly summary, analytics, etc.)
+        display_df = perf_df[display_cols]
+        # Column order: Symbol, Chart first
+        readonly_col_order = [
+            'Symbol', 'Chart',
+            'Market', 'Alert Date', 'Direction', 'Score', 'Setup', 'Criteria',
+            'Earnings', 'Alert $', 'Now $', 'P&L %', 'Max Gain %', 'Max DD %',
+            'Days', 'Status', 'Momentum',
+        ]
+        st.dataframe(
+            display_df.style
+                .applymap(color_pnl, subset=['P&L %'])
+                .applymap(color_momentum, subset=['Momentum']),
+            use_container_width=True,
+            hide_index=True,
+            column_order=readonly_col_order,
+            column_config={
+                'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+                'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+                'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
+                'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
+                'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
+                'Max Gain %': st.column_config.NumberColumn('Max %', format="%.1f%%"),
+                'Max DD %': st.column_config.NumberColumn('DD %', format="%.1f%%"),
+            }
+        )
 
 
 def _render_winner_analytics(market: str):

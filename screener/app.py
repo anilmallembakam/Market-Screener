@@ -149,7 +149,7 @@ render_mood_panel(daily_data, market.lower(), index_symbol)
 
 with tab_alerts:
     from screener.pages.page_alerts import render as render_alerts
-    render_alerts(daily_data, weekly_data, market.lower())
+    render_alerts(daily_data, weekly_data, market.lower(), index_symbol)
 
 with tab_scanner:
     from screener.pages.page_scanner import render as render_scanner

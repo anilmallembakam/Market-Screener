@@ -1,6 +1,10 @@
 import pandas as pd
+import numpy as np
 from typing import Dict
-from screener.config import CONSOLIDATION_LOOKBACK, CONSOLIDATION_PERCENTAGE, BREAKOUT_PERCENTAGE
+from screener.config import (
+    CONSOLIDATION_LOOKBACK, CONSOLIDATION_PERCENTAGE,
+    BREAKOUT_PERCENTAGE, BREAKOUT_VOLUME_FACTOR,
+)
 
 
 def is_consolidating(df: pd.DataFrame, lookback: int = CONSOLIDATION_LOOKBACK,
@@ -14,6 +18,27 @@ def is_consolidating(df: pd.DataFrame, lookback: int = CONSOLIDATION_LOOKBACK,
     return min_close > (max_close * threshold)
 
 
+def _has_volume_surge(df: pd.DataFrame, factor: float = BREAKOUT_VOLUME_FACTOR) -> bool:
+    """Check if the latest bar's volume is >= factor * 20-day average volume.
+
+    Returns True if volume data is missing (don't penalise stocks without volume).
+    """
+    if 'Volume' not in df.columns:
+        return True  # No volume data -> don't filter out
+
+    vol = df['Volume'].values.astype(float)
+    if len(vol) < 21:
+        return True
+
+    last_vol = vol[-1]
+    avg_vol = np.mean(vol[-21:-1])  # 20-day avg excluding today
+
+    if avg_vol <= 0 or np.isnan(avg_vol) or np.isnan(last_vol):
+        return True  # Can't compute -> don't filter out
+
+    return last_vol >= (avg_vol * factor)
+
+
 def is_breaking_out(df: pd.DataFrame, percentage: float = BREAKOUT_PERCENTAGE) -> bool:
     if len(df) < CONSOLIDATION_LOOKBACK + 2:
         return False
@@ -22,7 +47,7 @@ def is_breaking_out(df: pd.DataFrame, percentage: float = BREAKOUT_PERCENTAGE) -
     if is_consolidating(prior, percentage=percentage):
         prior_max = prior['Close'].iloc[-CONSOLIDATION_LOOKBACK:].max()
         if last_close > prior_max:
-            return True
+            return _has_volume_surge(df)
     return False
 
 
@@ -34,7 +59,7 @@ def is_breaking_down(df: pd.DataFrame, percentage: float = BREAKOUT_PERCENTAGE) 
     if is_consolidating(prior, percentage=percentage):
         prior_min = prior['Close'].iloc[-CONSOLIDATION_LOOKBACK:].min()
         if last_close < prior_min:
-            return True
+            return _has_volume_surge(df)
     return False
 
 
