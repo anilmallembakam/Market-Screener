@@ -1,62 +1,31 @@
 """Alert history storage and performance tracking.
-Uses Google Sheets for cloud storage with local JSON fallback."""
-import json
+Uses SQLite for persistent local storage."""
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional, List, Dict
 import streamlit as st
 
-# Storage path (fallback)
-_HISTORY_DIR = Path(__file__).resolve().parent.parent / '.alert_history'
-_HISTORY_FILE = _HISTORY_DIR / 'alerts.json'
-
-
-def _use_gsheet() -> bool:
-    """Check if Google Sheets is configured and should be used."""
-    try:
-        from screener.gsheet_storage import is_gsheet_configured
-        return is_gsheet_configured()
-    except Exception:
-        return False
-
-
-def _ensure_dir():
-    """Ensure history directory exists."""
-    _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+from screener.db import (
+    db_load_all_alerts,
+    db_save_alerts_batch,
+    db_get_historical_alerts,
+    db_get_alerts_by_date,
+    db_get_alerts_date_range,
+    db_get_available_dates,
+    db_delete_alert,
+    db_clear_old_alerts,
+)
 
 
 def load_history() -> List[dict]:
-    """Load alert history from storage (Google Sheets or local JSON)."""
-    # Try Google Sheets first
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import load_history_gsheet
-            return load_history_gsheet()
-        except Exception as e:
-            st.warning(f"Google Sheets error, falling back to local: {e}")
-
-    # Fallback to local JSON
-    if not _HISTORY_FILE.exists():
-        return []
-    try:
-        data = json.loads(_HISTORY_FILE.read_text(encoding='utf-8'))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    """Load all alert history from storage."""
+    return db_load_all_alerts()
 
 
 def save_history(history: List[dict]) -> None:
-    """Save alert history to local JSON file (for backup)."""
-    _ensure_dir()
-    try:
-        _HISTORY_FILE.write_text(
-            json.dumps(history, default=str, indent=2),
-            encoding='utf-8'
-        )
-    except Exception:
-        pass
+    """Legacy function - no longer needed with SQLite."""
+    pass
 
 
 def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], market: str = 'us') -> int:
@@ -66,12 +35,10 @@ def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], ma
 
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # Build list of alerts to save
     alerts_to_save = []
     for _, row in alerts_df.iterrows():
         symbol = row['Symbol']
 
-        # Get alert price from daily_data
         alert_price = 0.0
         if symbol in daily_data and not daily_data[symbol].empty:
             alert_price = float(daily_data[symbol]['Close'].iloc[-1])
@@ -89,100 +56,23 @@ def save_alerts(alerts_df: pd.DataFrame, daily_data: Dict[str, pd.DataFrame], ma
         }
         alerts_to_save.append(alert_record)
 
-    # Try Google Sheets first
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import save_alerts_batch_gsheet
-            saved = save_alerts_batch_gsheet(alerts_to_save)
-            if saved > 0:
-                st.success(f"Saved {saved} alerts to Google Sheets!")
-            return saved
-        except Exception as e:
-            st.warning(f"Google Sheets error: {e}. Saving to local file.")
-
-    # Fallback to local JSON
-    history = load_history()
-    existing_keys = {(a['symbol'], a['date']) for a in history}
-
-    new_count = 0
-    for alert in alerts_to_save:
-        key = (alert['symbol'], alert['date'])
-        if key not in existing_keys:
-            history.append(alert)
-            new_count += 1
-
-    if new_count > 0:
-        save_history(history)
-
-    return new_count
+    return db_save_alerts_batch(alerts_to_save)
 
 
 def get_historical_alerts(days_back: int = 30, market: str = None, direction: str = None) -> pd.DataFrame:
     """Get alerts from the last N days with optional market and direction filters."""
-    # Try Google Sheets first
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import get_historical_alerts_gsheet
-            return get_historical_alerts_gsheet(days_back, market, direction)
-        except Exception:
-            pass
-
-    # Fallback to local
-    history = load_history()
-    if not history:
-        return pd.DataFrame()
-
-    cutoff = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
-    filtered = [a for a in history if a.get('date', '') >= cutoff]
-
-    # Apply market filter
-    if market and market != 'all':
-        filtered = [a for a in filtered if a.get('market', 'us').lower() == market.lower()]
-
-    # Apply direction filter
-    if direction and direction != 'all':
-        filtered = [a for a in filtered if a.get('direction', '').lower() == direction.lower()]
-
-    if not filtered:
-        return pd.DataFrame()
-
-    return pd.DataFrame(filtered)
+    rows = db_get_historical_alerts(days_back, market, direction)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def delete_alert(symbol: str, date: str) -> bool:
     """Delete a specific alert from history."""
-    history = load_history()
-    original_len = len(history)
-    history = [a for a in history if not (a['symbol'] == symbol and a['date'] == date)]
-
-    if len(history) < original_len:
-        save_history(history)
-        return True
-    return False
+    return db_delete_alert(symbol, date)
 
 
 def clear_old_alerts(days_to_keep: int = 60) -> int:
     """Remove alerts older than N days. Returns count of removed alerts."""
-    # For Google Sheets
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import delete_old_alerts_gsheet
-            return delete_old_alerts_gsheet(days_to_keep)
-        except Exception:
-            pass
-
-    # Fallback to local
-    history = load_history()
-    cutoff = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
-
-    original_len = len(history)
-    history = [a for a in history if a.get('date', '') >= cutoff]
-
-    removed = original_len - len(history)
-    if removed > 0:
-        save_history(history)
-
-    return removed
+    return db_clear_old_alerts(days_to_keep)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -190,7 +80,7 @@ def fetch_performance_data(symbol: str, start_date: str, days: int = 20) -> Opti
     """Fetch price data from alert date to track performance."""
     try:
         start = datetime.strptime(start_date, '%Y-%m-%d')
-        end = start + timedelta(days=days + 5)  # Extra days for weekends
+        end = start + timedelta(days=days + 5)
 
         ticker = yf.Ticker(symbol)
         df = ticker.history(start=start, end=end)
@@ -228,17 +118,15 @@ def calculate_performance(alert: dict, price_data: pd.DataFrame) -> dict:
     current_price = float(closes[-1])
     days_tracked = len(closes)
 
-    # Calculate P&L based on direction
     if direction == 'Bullish':
         pnl_pct = ((current_price - alert_price) / alert_price) * 100
         max_gain_pct = ((max(highs) - alert_price) / alert_price) * 100
         max_drawdown_pct = ((min(lows) - alert_price) / alert_price) * 100
-    else:  # Bearish
+    else:
         pnl_pct = ((alert_price - current_price) / alert_price) * 100
         max_gain_pct = ((alert_price - min(lows)) / alert_price) * 100
         max_drawdown_pct = ((alert_price - max(highs)) / alert_price) * 100
 
-    # Determine status
     if pnl_pct >= 10:
         status = 'Winner'
     elif pnl_pct >= 5:
@@ -250,7 +138,6 @@ def calculate_performance(alert: dict, price_data: pd.DataFrame) -> dict:
     else:
         status = 'Loser'
 
-    # Detect momentum loss (losing steam)
     momentum = _detect_momentum(closes, direction)
 
     return {
@@ -269,7 +156,6 @@ def _detect_momentum(closes: list, direction: str) -> str:
     if len(closes) < 5:
         return 'Too Early'
 
-    # Calculate short-term and medium-term returns
     recent_5d = closes[-1] / closes[-5] - 1 if len(closes) >= 5 else 0
 
     if len(closes) >= 10:
@@ -278,16 +164,16 @@ def _detect_momentum(closes: list, direction: str) -> str:
         prev_5d = recent_5d
 
     if direction == 'Bullish':
-        if recent_5d < -0.03:  # Down more than 3% in last 5 days
+        if recent_5d < -0.03:
             return 'Losing Steam'
-        elif recent_5d < prev_5d - 0.02:  # Momentum slowing
+        elif recent_5d < prev_5d - 0.02:
             return 'Slowing'
         elif recent_5d > 0.02:
             return 'Strong'
         else:
             return 'Stable'
-    else:  # Bearish
-        if recent_5d > 0.03:  # Up more than 3% (bad for bearish)
+    else:
+        if recent_5d > 0.03:
             return 'Losing Steam'
         elif recent_5d > prev_5d + 0.02:
             return 'Slowing'
@@ -299,68 +185,23 @@ def _detect_momentum(closes: list, direction: str) -> str:
 
 def get_alerts_by_date(date_str: str, market: str = None) -> pd.DataFrame:
     """Get alerts for a specific date."""
-    # Try Google Sheets first
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import get_alerts_by_date_gsheet
-            return get_alerts_by_date_gsheet(date_str, market)
-        except Exception:
-            pass
-
-    # Fallback to local
-    history = load_history()
-    if not history:
-        return pd.DataFrame()
-
-    filtered = [a for a in history if a.get('date', '') == date_str]
-
-    if market and market != 'all':
-        filtered = [a for a in filtered if a.get('market', 'us').lower() == market.lower()]
-
-    return pd.DataFrame(filtered) if filtered else pd.DataFrame()
+    rows = db_get_alerts_by_date(date_str, market)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def get_alerts_date_range(start_date: str, end_date: str, market: str = None) -> pd.DataFrame:
     """Get alerts within a date range."""
-    history = load_history()
-    if not history:
-        return pd.DataFrame()
-
-    filtered = [
-        a for a in history
-        if start_date <= a.get('date', '') <= end_date
-    ]
-
-    if market and market != 'all':
-        filtered = [a for a in filtered if a.get('market', 'us').lower() == market.lower()]
-
-    return pd.DataFrame(filtered) if filtered else pd.DataFrame()
+    rows = db_get_alerts_date_range(start_date, end_date, market)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def get_available_dates() -> list:
     """Get list of all dates that have alerts."""
-    # Try Google Sheets first
-    if _use_gsheet():
-        try:
-            from screener.gsheet_storage import get_available_dates_gsheet
-            return get_available_dates_gsheet()
-        except Exception:
-            pass
-
-    # Fallback to local
-    history = load_history()
-    if not history:
-        return []
-
-    dates = sorted(set(a.get('date', '') for a in history if a.get('date')), reverse=True)
-    return dates
+    return db_get_available_dates()
 
 
 def get_weekly_summary(weeks_back: int = 1, market: str = None) -> dict:
-    """
-    Generate weekly performance summary.
-    Returns stats for alerts from the past N weeks.
-    """
+    """Generate weekly performance summary."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7 * weeks_back)
 
@@ -384,7 +225,6 @@ def get_weekly_summary(weeks_back: int = 1, market: str = None) -> dict:
             'losing_steam_count': 0,
         }
 
-    # Calculate performance for each alert
     performance_list = []
     for _, alert in alerts_df.iterrows():
         price_data = fetch_performance_data(alert['symbol'], alert['date'], 20)
@@ -397,19 +237,16 @@ def get_weekly_summary(weeks_back: int = 1, market: str = None) -> dict:
 
     perf_df = pd.DataFrame(performance_list)
 
-    # Calculate stats
     winners = len(perf_df[perf_df['pnl_pct'] >= 5])
     losers = len(perf_df[perf_df['pnl_pct'] <= -5])
     total = len(perf_df)
 
-    # Best and worst performers
     best_idx = perf_df['pnl_pct'].idxmax() if not perf_df.empty else None
     worst_idx = perf_df['pnl_pct'].idxmin() if not perf_df.empty else None
 
     best = perf_df.loc[best_idx].to_dict() if best_idx is not None else None
     worst = perf_df.loc[worst_idx].to_dict() if worst_idx is not None else None
 
-    # Group by direction
     by_direction = {}
     for direction in perf_df['direction'].unique():
         dir_df = perf_df[perf_df['direction'] == direction]
@@ -419,7 +256,6 @@ def get_weekly_summary(weeks_back: int = 1, market: str = None) -> dict:
             'win_rate': round(len(dir_df[dir_df['pnl_pct'] >= 5]) / len(dir_df) * 100, 1) if len(dir_df) > 0 else 0
         }
 
-    # Group by market
     by_market = {}
     for mkt in perf_df['market'].unique():
         mkt_df = perf_df[perf_df['market'] == mkt]
@@ -444,4 +280,59 @@ def get_weekly_summary(weeks_back: int = 1, market: str = None) -> dict:
         'losing_steam_count': losing_steam,
         'period_start': start_date.strftime('%Y-%m-%d'),
         'period_end': end_date.strftime('%Y-%m-%d'),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Entry-signal performance (lightweight — no API calls)
+# ---------------------------------------------------------------------------
+
+def compute_signal_performance(signal: dict, current_price: float) -> dict:
+    """Compute live performance for a persisted entry signal.
+
+    Takes the stored signal dict + a current price and returns P&L,
+    days held, and an auto-detected status hint.
+    """
+    entry = float(signal.get('entry_price', 0))
+    direction = signal.get('direction', 'Bullish')
+    signal_date = signal.get('signal_date', datetime.now().strftime('%Y-%m-%d'))
+
+    try:
+        days_held = (datetime.now() - datetime.strptime(signal_date, '%Y-%m-%d')).days
+    except (ValueError, TypeError):
+        days_held = 0
+
+    if entry <= 0:
+        return {'current_price': current_price, 'pnl_pct': 0,
+                'days_held': days_held, 'status_hint': 'Active'}
+
+    if direction == 'Bullish':
+        pnl_pct = ((current_price - entry) / entry) * 100
+    else:
+        pnl_pct = ((entry - current_price) / entry) * 100
+
+    # Auto-detect if stop or target has been breached
+    stop = float(signal.get('stop_loss', 0))
+    t1 = float(signal.get('target_1', 0))
+
+    if direction == 'Bullish':
+        if stop > 0 and current_price <= stop:
+            status_hint = 'Stopped Out'
+        elif t1 > 0 and current_price >= t1:
+            status_hint = 'Target Hit'
+        else:
+            status_hint = 'Active'
+    else:
+        if stop > 0 and current_price >= stop:
+            status_hint = 'Stopped Out'
+        elif t1 > 0 and current_price <= t1:
+            status_hint = 'Target Hit'
+        else:
+            status_hint = 'Active'
+
+    return {
+        'current_price': round(current_price, 2),
+        'pnl_pct': round(pnl_pct, 2),
+        'days_held': days_held,
+        'status_hint': status_hint,
     }

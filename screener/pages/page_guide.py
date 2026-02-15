@@ -18,6 +18,10 @@ def render():
     st.markdown("---")
     _render_trading_combinations()
     st.markdown("---")
+    _render_how_to_trade()
+    st.markdown("---")
+    _render_filters_guide()
+    st.markdown("---")
     _render_scoring_system()
     st.markdown("---")
     _render_quick_reference()
@@ -30,18 +34,22 @@ def _render_quick_start():
         "**Recommended Daily Workflow:**\n\n"
         "1. **Check Market Mood** (top panel) -- Is the market bullish, bearish, or neutral?\n"
         "2. **Scan Alerts** (tab 1) -- Find stocks with high confluence scores (5+ is strong)\n"
-        "3. **Verify Technicals** (tab 3) -- Drill into individual indicator values\n"
-        "4. **Check Chart** (tab 8) -- Visually confirm price action and patterns\n"
-        "5. **Trade Signals** (tab 7) -- For index option strategies (Nifty / BankNifty)\n\n"
+        "3. **Use Filters** -- Toggle Clean Close Only, check RS %, filter by direction\n"
+        "4. **Verify Technicals** (tab 3) -- Drill into individual indicator values\n"
+        "5. **Check Chart** (tab 8) -- Visually confirm price action and patterns\n"
+        "6. **Add to Watchlist** -- Tick stocks and track them over time\n"
+        "7. **Trade Signals** (tab 7) -- For index option strategies (Nifty / BankNifty)\n\n"
         "**Tab Guide:**\n"
-        "- **Alerts/Summary** -- Start here. Stocks ranked by multi-factor score\n"
+        "- **Alerts/Summary** -- Start here. Stocks ranked by multi-factor score, RS %, clean close filter\n"
         "- **Pattern Scanner** -- Hunt for specific candlestick patterns across all stocks\n"
         "- **Technicals** -- Deep-dive into RSI, MACD, EMA, BB, ADX for each stock\n"
-        "- **Breakouts** -- Stocks breaking out of consolidation ranges\n"
+        "- **Breakouts** -- Stocks breaking out of consolidation ranges (now with volume confirmation)\n"
         "- **S/R Levels** -- Support & resistance zones on chart\n"
         "- **F&O Data** -- Options chain, PCR, Max Pain, OI analysis\n"
         "- **Trade Signals** -- Strategy recommendations + strike details for index options\n"
-        "- **Chart** -- Interactive chart with indicator overlays"
+        "- **Chart** -- Interactive chart with indicator overlays\n"
+        "- **Tracker** -- Track saved alerts and their performance over time\n"
+        "- **Watchlist** -- Your personal watchlist with live P&L tracking"
     )
 
 
@@ -569,7 +577,336 @@ Example: Sell 24,300 CE/PE, Buy 24,500 CE + 24,100 PE = defined risk.
 """)
 
 
-# ── Section 5 ──────────────────────────────────────────────────────────────
+# ── Section 5: How to Trade ────────────────────────────────────────────────
+def _render_how_to_trade():
+    st.subheader("How to Trade Each Setup")
+    st.markdown(
+        "Step-by-step **practical execution guide** for each combo the screener "
+        "identifies. This is the action plan once you see a setup in the Alerts tab."
+    )
+
+    # ── Trend Following ──
+    with st.expander("Trading Trend Following Setups", expanded=False):
+        st.markdown("""
+### When Alerts Shows: Combo = "Trend Following"
+
+**What You See:**
+EMA aligned bullish + ADX strong + volume confirms + bullish candlestick pattern
+
+**Step-by-Step Execution:**
+
+1. **Pre-check RS %** -- Is RS % positive? If yes, the stock is outperforming the index, which adds conviction. If RS % is negative, be cautious -- the trend may not last.
+
+2. **Entry:** Do NOT chase the current candle. Wait for a pullback to the 20 EMA. Set a price alert at the EMA20 level.
+
+3. **Confirmation:** When price touches EMA20, look for a bullish candle (green, close in upper half). The screener's Clean Close filter helps here.
+
+4. **Stop Loss:** Place below the 50 EMA or the most recent swing low, whichever is tighter. Alternatively, use 1.5x ATR below entry.
+
+5. **Target:**
+   - **Take 50% off** at 2:1 risk-reward
+   - **Trail the rest** using the 20 EMA -- exit when price closes below it on daily chart
+
+6. **Position Size:** Risk 1-2% of capital. If stop is 3% from entry, position = (Capital x 2%) / (Entry x 3%).
+
+**Best Conditions:**
+- RS % > +5 (stock is a market leader)
+- Clean Close = Yes
+- Score >= 6
+- ADX > 25 and rising
+
+**When to Skip:**
+- RS % < -5 (laggard fighting the market)
+- Market Mood panel is bearish
+- ADX is declining (trend weakening)
+""")
+
+    # ── Mean Reversion ──
+    with st.expander("Trading Mean Reversion Setups", expanded=False):
+        st.markdown("""
+### When Alerts Shows: Combo = "Mean Reversion"
+
+**What You See:**
+RSI oversold + near lower Bollinger Band + reversal candle pattern (hammer, engulfing, morning star)
+
+**Step-by-Step Execution:**
+
+1. **Verify Clean Close** -- This is CRITICAL for mean reversion. A Clean Close confirms that buyers actually stepped in. Without it, the stock may keep falling.
+
+2. **Check Close %** -- Should be > 67% for bullish (price closed in the upper third of the day's range). This shows buying pressure into the close.
+
+3. **Entry:** Buy on the reversal candle close, or wait for the next day's open if it opens above the reversal candle's midpoint.
+
+4. **Stop Loss:** Below the reversal candle's low. This is usually a tight stop (1-3%), which is ideal for mean reversion.
+
+5. **Target:**
+   - **First target:** Middle Bollinger Band (20 SMA) -- typically a 2-5% move
+   - **Second target:** If RSI crosses 50 with momentum, hold for upper BB
+
+6. **Exit Rules:**
+   - Take full profit at middle BB (conservative)
+   - Or take 50% at middle BB, trail rest to upper BB
+   - EXIT IMMEDIATELY if price makes a new low below your reversal candle
+
+**Best Conditions:**
+- Clean Close = Yes (essential!)
+- Close % > 67
+- Multiple confluence: RSI < 30 AND lower BB AND reversal candle
+- Nearby support level visible on chart
+
+**When to Skip:**
+- No clean close (candle has big upper wick = sellers still active)
+- Stock is in strong downtrend (EMA 20 < 50 < 200) -- it can stay oversold for weeks
+- ADX > 25 with bearish direction (trend too strong to fade)
+- RS % is deeply negative (< -10) -- fundamental problem likely
+""")
+
+    # ── Breakout ──
+    with st.expander("Trading Breakout Setups", expanded=False):
+        st.markdown("""
+### When Alerts Shows: Combo = "Breakout"
+
+**What You See:**
+Breaking consolidation + high volume (1.5x+ avg) + MACD bullish. Note: the screener now
+requires volume > 1.5x average for a breakout to be confirmed -- low-volume breakouts are
+automatically filtered out.
+
+**Step-by-Step Execution:**
+
+1. **Check Volume in Criteria** -- Look for "Volume Confirmation" in the criteria list. The higher the volume ratio, the better (2x+ is excellent).
+
+2. **Entry Strategy (choose one):**
+   - **Aggressive:** Buy on the breakout candle close (same day)
+   - **Conservative:** Wait for a pullback to the breakout level next day. The old resistance should now act as support. Enter if it holds.
+
+3. **Stop Loss:** Just below the consolidation range. This is the level the stock broke out from. If price falls back into the range, the breakout has failed.
+
+4. **Target:** Measured move = height of the consolidation range added to the breakout point.
+   - Example: Stock consolidated between 245-255 (range = 10), breaks out at 255
+   - Target = 255 + 10 = 265
+
+5. **Managing the Trade:**
+   - Move stop to breakeven after stock moves 1x the range height
+   - Trail stop 1.5x ATR below price for runners
+
+**Best Conditions:**
+- RS % positive (outperforming the market adds tailwind)
+- Clean Close = Yes (strong close above breakout level)
+- Volume > 2x average (institutional participation)
+- MACD bullish crossover + ADX rising from low levels
+
+**When to Skip:**
+- Volume is only slightly above average (1.0-1.3x) -- likely false breakout
+- Market Mood is bearish (breakouts fail more in bear markets)
+- Stock broke out but closed in the lower half of the range (weak close)
+- RS % deeply negative (stock is weak relative to the market)
+
+**False Breakout Protection:**
+The screener's volume filter already removes many false breakouts. Additionally:
+- If the stock closes back inside the range on the next day, EXIT immediately
+- Use the "retest" entry method if you are risk-averse
+""")
+
+    # ── Sell/Short ──
+    with st.expander("Trading Sell/Short Setups", expanded=False):
+        st.markdown("""
+### When Alerts Shows: Combo = "Sell/Short"
+
+**What You See:**
+RSI overbought + near upper Bollinger Band + bearish candle pattern + EMA bearish
+
+**Step-by-Step Execution:**
+
+1. **Check RS %** -- A negative RS % means the stock is already underperforming the index. This is ideal for shorts -- you're going with the relative weakness.
+
+2. **Entry:**
+   - **For shorting:** Enter on the bearish reversal candle close
+   - **For buying puts:** Buy ATM or slightly OTM put with 2-4 weeks expiry
+   - **For exiting longs:** This is your signal to take profits on existing positions
+
+3. **Stop Loss:** Above the recent high or the bearish candle's high. This is your invalidation level.
+
+4. **Target:**
+   - **First target:** 20 SMA (middle Bollinger Band)
+   - **Second target:** Lower Bollinger Band or RSI = 30
+
+5. **Position Sizing:** Size smaller for short trades (1% risk max). Shorts can snap back violently.
+
+**Best Conditions:**
+- RS % < -5 (underperformer -- weakest stock in a weak group)
+- Clean Close = Yes (bearish clean close: closed in lower third, strong red body)
+- Multiple bearish patterns in the Pattern column
+- Score >= 6
+
+**When to Skip:**
+- Strong uptrend with high RS % (don't short market leaders)
+- Market Mood is strongly bullish (tide lifts all boats)
+- No clean close (the candle has a long lower wick = buyers stepping in)
+
+**Indian Market Note:**
+Shorting in cash market is intraday only (MIS). For swing shorts:
+- Use F&O stocks: Buy put options
+- Or use the signal to exit existing longs / avoid new longs
+""")
+
+    # ── Quick filter cheat sheet ──
+    st.markdown("""
+### Quick Filter Cheat Sheet
+
+Use these filter combinations in the Alerts tab to find specific types of trades:
+
+| What You Want | Filters to Set |
+|---|---|
+| **Highest conviction longs** | Bullish Only + Clean Close On + look for RS % > 0 + Score >= 7 |
+| **Quick bounce trades** | Min score 5 + Bullish Only + look for "Mean Reversion" in Combo column |
+| **Momentum breakouts** | Look for "Breakout" combo + check Volume Confirmation in criteria |
+| **Shorts / hedges** | Bearish Only + Clean Close On + look for RS % < 0 |
+| **Broad scan (finding ideas)** | All directions + Min score 5 + sort by Score descending |
+| **Market leaders only** | Bullish Only + sort RS % column descending (top outperformers) |
+| **Weakest stocks to short** | Bearish Only + sort RS % column ascending (worst underperformers) |
+
+### Position Sizing by Score
+
+| Score | Confidence | Suggested Position Size |
+|-------|-----------|------------------------|
+| 5 | Moderate | 0.5-1% of capital risk |
+| 6 | Good | 1-1.5% of capital risk |
+| 7 | Strong | 1.5-2% of capital risk |
+| 8+ | Very Strong | 2% of capital risk (max) |
+
+*Never exceed 2% risk per trade regardless of score. The score reflects confluence, not certainty.*
+""")
+
+
+# ── Section 5b: Filters Guide ─────────────────────────────────────────────
+def _render_filters_guide():
+    st.subheader("Understanding Screener Columns & Filters")
+
+    with st.expander("RS % (Relative Strength)", expanded=False):
+        st.markdown("""
+### RS % - Relative Strength vs Index
+
+**What it is:** The stock's 1-month return MINUS the index's 1-month return.
+- US market: compared to S&P 500
+- Indian market: compared to Nifty
+
+**How to read:**
+- **RS % > 0:** Stock is **outperforming** the index over the past month
+- **RS % = 0:** Stock is moving in line with the index
+- **RS % < 0:** Stock is **underperforming** the index
+
+**Key levels:**
+| RS % | Meaning | Action |
+|------|---------|--------|
+| **> +10** | Strong outperformer / market leader | High conviction for bullish setups |
+| **+5 to +10** | Moderate outperformer | Good for trend following & breakouts |
+| **-5 to +5** | In line with market | Signals less differentiated |
+| **-5 to -10** | Moderate underperformer | Be cautious on bullish alerts |
+| **< -10** | Weak laggard | Best for bearish/short setups, avoid bullish |
+
+**How to use in practice:**
+- For **bullish alerts:** Prefer stocks with RS % > 0. These are moving with momentum.
+- For **bearish alerts:** Prefer stocks with RS % < 0. These are already weak relative to the market.
+- **Avoid:** Bullish alerts on stocks with deeply negative RS % (fighting the relative trend)
+- **Sort the column** to find the strongest or weakest stocks quickly
+
+**Example:**
+- NVDA has RS % = +8.5, Score 7, Bullish, Breakout combo -- HIGH conviction (strong stock breaking out)
+- XYZ has RS % = -12.3, Score 5, Bullish, Mean Reversion -- LOWER conviction (weak stock trying to bounce)
+""")
+
+    with st.expander("Clean Close Filter", expanded=False):
+        st.markdown("""
+### Clean Close -- Candle Quality Filter
+
+**What it is:** Checks if the last candle closed strongly in the direction of the alert.
+
+**How it works:**
+- **Bullish Clean Close:** Close in top 33% of day's range + body > 40% of range + green candle
+- **Bearish Clean Close:** Close in bottom 33% of day's range + body > 40% of range + red candle
+
+**Why it matters:**
+A stock can have strong technical signals (high score) but if the last candle closed with a big
+upper wick and a small body, the buyers didn't actually hold control at the close. Clean close
+tells you that price action CONFIRMS the technical signals.
+
+**The Close % column:**
+- Shows where price closed in the day's range as a percentage
+- **100** = closed at the absolute high of the day (very bullish)
+- **50** = closed at the midpoint
+- **0** = closed at the absolute low of the day (very bearish)
+
+**When to use the Clean Close filter:**
+- **Turn ON** when you want the highest conviction setups only
+- **Turn OFF** when you want to see all ideas (some good trades don't have clean closes yet)
+- Mean reversion trades NEED clean close (confirms the reversal candle is genuine)
+- Trend following trades: clean close is nice-to-have but not essential
+
+**Numbers behind it:**
+- Clean Close ON typically reduces the alert list by 50-70%
+- The remaining stocks tend to have better short-term follow-through
+""")
+
+    with st.expander("Volume Confirmation on Breakouts", expanded=False):
+        st.markdown("""
+### Volume-Confirmed Breakouts
+
+**What changed:** Breakout and breakdown signals now require volume > 1.5x the 20-day
+average. Previously, any price break above/below the consolidation range would trigger a
+breakout signal, even on low volume.
+
+**Why this matters:**
+- **With volume:** Institutional participation, real conviction behind the move
+- **Without volume:** Likely a false breakout that will reverse back into the range
+
+**How it affects your alerts:**
+- Fewer breakout signals overall (removes low-quality ones)
+- The breakouts that DO appear have higher reliability
+- Each breakout signal is worth +2 points in the score, so these are high-value signals
+
+**What you might notice:**
+- Some consolidating stocks that previously showed as "Breakout" may now show as
+  "Trend Following" or "Mean Reversion" instead (since the breakout didn't qualify)
+- The overall quality of breakout alerts should be higher
+- You may see fewer stocks total at lower score thresholds
+
+**The 1.5x threshold:**
+This is configured in the system (BREAKOUT_VOLUME_FACTOR = 1.5). The value means the
+breakout bar's volume must be at least 150% of the 20-day average volume. For reference:
+- 1.5x: Good confirmation (current setting)
+- 2.0x: Strong confirmation (what many traders look for)
+- 1.0x: No volume filter (the old behaviour)
+""")
+
+    with st.expander("Score, Direction, and Combo Columns", expanded=False):
+        st.markdown("""
+### Understanding the Alert Table Columns
+
+**Score:** The higher of the bullish or bearish signal count. Score 5+ is where you
+should focus. See the Scoring System section below for the full breakdown.
+
+**Bull / Bear:** The individual bullish and bearish signal counts. If Bull = 6 and Bear = 4,
+the alert is Bullish with Score 6. But note: Bear = 4 means there IS some conflicting signal.
+Highest conviction comes when the opposing score is low (0-2).
+
+**Direction:** Bullish or Bearish, based on which score is higher. In a tie, defaults to Bullish.
+
+**Combo (Trading Setup):** The recommended strategy based on which signals are present:
+- **Trend Following** -- EMA aligned + ADX strong + volume + bullish pattern
+- **Mean Reversion** -- RSI oversold + lower BB + reversal candle
+- **Breakout** -- Price breaking consolidation + volume + MACD
+- **Sell/Short** -- RSI overbought + upper BB + bearish pattern + EMA bearish
+- **No clear setup** -- Signals are mixed with insufficient confluence for any strategy
+
+**Pattern:** Candlestick patterns detected matching the alert direction.
+
+**Criteria:** The specific technical signals that contributed to the score.
+
+**Chart / Flow:** Quick links to TradingView chart and Unusual Whales option flow.
+""")
+
+
+# ── Section 6 ──────────────────────────────────────────────────────────────
 def _render_scoring_system():
     st.subheader("Alert Scoring System Explained")
     st.markdown(

@@ -28,6 +28,12 @@ ADX_PERIOD = 14
 CONSOLIDATION_LOOKBACK = 15
 CONSOLIDATION_PERCENTAGE = 2.0
 BREAKOUT_PERCENTAGE = 2.5
+BREAKOUT_VOLUME_FACTOR = 1.5  # Breakout must have volume >= 1.5x 20-day avg
+
+# Entry signal thresholds (Trend Following)
+ENTRY_EMA_PULLBACK_PCT = 2.0       # max % distance from EMA20 for pullback
+ENTRY_ADX_MIN = 25                  # minimum ADX for trend strength
+ENTRY_VOLUME_RATIO_PREFERRED = 1.5  # volume ratio for "confirmed" signal
 
 # S/R detection
 SR_PIVOT_WINDOW = 5

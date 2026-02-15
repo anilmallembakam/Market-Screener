@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd Watchlist feature for curating and monitoring stocks\n\nNew Watchlist tab lets users manually curate stocks from alerts and track\ntheir performance with P&L, momentum, earnings proximity, and chart links.\nIncludes per-stock and bulk add from Alerts tab, GSheet + local JSON storage,\nand remove functionality.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(python -c:*)"
+    ]
+  }
+}
