@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict
 from screener.candlestick_patterns import CANDLESTICK_PATTERNS, scan_batch
-from screener.utils import get_chart_url
+from screener.utils import get_chart_url, get_unusual_whales_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
@@ -33,8 +33,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
 
         st.markdown(f"**{len(results)} signals found**")
 
-        # Add Chart link column
+        # Add Chart and Option Flow link columns
         results['Chart'] = results['Symbol'].apply(get_chart_url)
+        results['Option Flow'] = results['Symbol'].apply(get_unusual_whales_url)
 
         def color_signal(val):
             if val == 'bullish':
@@ -49,6 +50,7 @@ def render(daily_data: Dict[str, pd.DataFrame]):
             hide_index=True,
             column_config={
                 'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
             },
         )
 

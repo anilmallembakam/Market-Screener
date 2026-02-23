@@ -23,7 +23,7 @@ from screener.scheduler import (
 from screener.alerts import detect_entry_signal
 from screener.alert_history import compute_signal_performance
 from screener.db import db_save_entry_signals, db_load_active_entry_signals, db_update_entry_signal_status
-from screener.utils import get_chart_url
+from screener.utils import get_chart_url, get_unusual_whales_url
 from screener.watchlist_store import add_to_watchlist, is_in_watchlist, get_watchlist_symbols
 
 
@@ -104,12 +104,14 @@ def _process_single_alert(alert_dict: dict, alert_date: str, track_days: int) ->
     perf = calculate_performance(alert_dict, price_data)
     earnings_info = _get_earnings_date(symbol)
     chart_url = get_chart_url(symbol)
+    uw_url = get_unusual_whales_url(symbol)
 
     display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
 
     return {
         'Symbol': display_symbol,
         'Chart': chart_url,
+        'Option Flow': uw_url,
         'Market': alert_market,
         'Alert Date': alert_date,
         'Direction': alert_dict.get('direction', 'N/A'),
@@ -321,7 +323,7 @@ def render(daily_data: Dict[str, pd.DataFrame], market: str = 'us'):
 
 def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
     """Main tracker view with filters and auto-save."""
-    st.caption("Track how your alerted stocks perform over 5-20 days")
+    st.caption("Performance is calculated from the alert date. Save alerts from the Alerts tab or enable Auto-Save.")
 
     # Auto-save section
     with st.expander("🤖 Auto-Save Settings", expanded=False):
@@ -410,7 +412,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
         """)
         return
 
-    st.markdown(f"**{len(alerts_df)} alerts found** from the last {days_back} days")
+    st.info(f"📋 **{len(alerts_df)} alerts** from the last {days_back} days")
 
     # Calculate performance for each alert (parallel)
     progress_bar = st.progress(0, text="Calculating performance...")
@@ -427,7 +429,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
     _render_summary_metrics(perf_df)
 
     # Filter options for table
-    st.subheader("Alerts Performance")
+    st.subheader("📋 Alert Performance")
     col1, col2 = st.columns(2)
     with col1:
         status_filter = st.multiselect(
@@ -502,21 +504,21 @@ def _render_entry_signals_tab(daily_data: Dict[str, pd.DataFrame], market: str):
     """Entry Signals tab — saved signals from DB + live scan for new ones."""
 
     # ── Section A: Saved Signals (from DB) ─────────────────────────────
-    st.subheader("Saved Entry Signals")
-    st.caption("Loaded from database — persists across sessions")
+    st.subheader("🗂️ Saved Entry Signals")
+    st.caption("Persisted across sessions. Close a signal when your trade is done.")
 
     saved = db_load_active_entry_signals(source='Tracker')
 
     if saved:
         _render_tracker_saved_signals(saved, daily_data, key_prefix='tracker_saved')
     else:
-        st.info("No saved entry signals yet. Scan below and save new ones.")
+        st.info("No saved entry signals yet. Run a scan below and save the ones you like.")
 
-    st.markdown("---")
+    st.divider()
 
     # ── Section B: New Signals Detected (live scan) ────────────────────
-    st.subheader("New Signals Detected")
-    st.caption("Live scan of tracked stocks — save to track performance")
+    st.subheader("🔍 New Signals Detected")
+    st.caption("Live scan of your tracked stocks for fresh Trend Following entry signals.")
 
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -747,7 +749,7 @@ def _render_tracker_saved_signals(saved: list, daily_data: Dict[str, pd.DataFram
 
 def _render_calendar_view(market: str):
     """Calendar-based historical view of alerts."""
-    st.caption("View alerts from any date and see their performance till today")
+    st.caption("Select a past date to see which alerts were triggered and how they performed since then.")
 
     # Get available dates
     available_dates = get_available_dates()
@@ -820,7 +822,7 @@ def _render_calendar_view(market: str):
 
 def _render_weekly_summary(market: str):
     """Weekly performance summary report."""
-    st.caption("End-of-week performance report on your alerts")
+    st.caption("Aggregated win rate, average P&L, and top/worst performers for the selected period.")
 
     col1, col2 = st.columns([1, 2])
 
@@ -940,7 +942,7 @@ def _render_weekly_summary(market: str):
 
 def _render_summary_metrics(perf_df: pd.DataFrame):
     """Render summary metrics row."""
-    st.subheader("Summary")
+    st.subheader("📊 Performance Summary")
     col1, col2, col3, col4, col5 = st.columns(5)
 
     winners = len(perf_df[perf_df['P&L %'] >= 5])
@@ -950,15 +952,15 @@ def _render_summary_metrics(perf_df: pd.DataFrame):
     losing_steam = len(perf_df[perf_df['Momentum'] == 'Losing Steam'])
 
     with col1:
-        st.metric("Winners (>5%)", winners, delta=f"{winners/len(perf_df)*100:.0f}%")
+        st.metric("🟢 Winners (>5%)", winners, delta=f"{winners/len(perf_df)*100:.0f}% win rate")
     with col2:
-        st.metric("Losers (<-5%)", losers, delta=f"-{losers/len(perf_df)*100:.0f}%", delta_color="inverse")
+        st.metric("🔴 Losers (<-5%)", losers, delta=f"-{losers/len(perf_df)*100:.0f}%", delta_color="inverse")
     with col3:
-        st.metric("Flat", flat)
+        st.metric("⚪ Flat", flat, help="P&L between -5% and +5%")
     with col4:
-        st.metric("Avg P&L", f"{avg_pnl:.1f}%", delta="Good" if avg_pnl > 0 else "Bad")
+        st.metric("📈 Avg P&L", f"{avg_pnl:.1f}%", delta="Profitable" if avg_pnl > 0 else "Unprofitable", delta_color="normal" if avg_pnl >= 0 else "inverse")
     with col5:
-        st.metric("Losing Steam", losing_steam, delta="Watch" if losing_steam > 0 else None, delta_color="off")
+        st.metric("⚠️ Losing Steam", losing_steam, delta="Exit candidates" if losing_steam > 0 else "None", delta_color="off")
 
 
 def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', editable: bool = True):
@@ -1003,7 +1005,7 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', ed
 
         # Column order: WL, Symbol, Chart first, then the rest
         tracker_col_order = [
-            'Add to WL', 'Symbol', 'Chart',
+            'Add to WL', 'Symbol', 'Chart', 'Option Flow',
             'Market', 'Alert Date', 'Direction', 'Score', 'Setup', 'Criteria',
             'Earnings', 'Alert $', 'Now $', 'P&L %', 'Max Gain %', 'Max DD %',
             'Days', 'Status', 'Momentum',
@@ -1021,6 +1023,7 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', ed
                 'Add to WL': st.column_config.CheckboxColumn('WL', width='small', help='Select to add to watchlist'),
                 'Symbol': st.column_config.TextColumn('Symbol', width='small'),
                 'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+                'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
                 'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
                 'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
                 'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
@@ -1067,7 +1070,7 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', ed
         display_df = perf_df[display_cols]
         # Column order: Symbol, Chart first
         readonly_col_order = [
-            'Symbol', 'Chart',
+            'Symbol', 'Chart', 'Option Flow',
             'Market', 'Alert Date', 'Direction', 'Score', 'Setup', 'Criteria',
             'Earnings', 'Alert $', 'Now $', 'P&L %', 'Max Gain %', 'Max DD %',
             'Days', 'Status', 'Momentum',
@@ -1082,6 +1085,7 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', ed
             column_config={
                 'Symbol': st.column_config.TextColumn('Symbol', width='small'),
                 'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+                'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
                 'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
                 'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
                 'P&L %': st.column_config.NumberColumn('P&L %', format="%.1f%%"),
@@ -1093,7 +1097,7 @@ def _render_performance_table(perf_df: pd.DataFrame, key: str = 'perf_table', ed
 
 def _render_winner_analytics(market: str):
     """Analyze common factors among winning alerts."""
-    st.caption("Discover what makes alerts successful - find common patterns among winners")
+    st.caption("Find common patterns, setups, and criteria among your best-performing alerts.")
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:

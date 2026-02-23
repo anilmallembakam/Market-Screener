@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict
 from screener.breakout_detector import scan_batch
-from screener.utils import get_chart_url
+from screener.utils import get_chart_url, get_unusual_whales_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
@@ -24,8 +24,9 @@ def render(daily_data: Dict[str, pd.DataFrame]):
     if status_filter != "All":
         filtered = filtered[filtered['Status'] == status_filter]
 
-    # Add Chart link column
+    # Add Chart and Option Flow link columns
     filtered['Chart'] = filtered['Symbol'].apply(get_chart_url)
+    filtered['Option Flow'] = filtered['Symbol'].apply(get_unusual_whales_url)
 
     st.markdown(f"**{len(filtered)} stocks found**")
 
@@ -44,6 +45,7 @@ def render(daily_data: Dict[str, pd.DataFrame]):
         hide_index=True,
         column_config={
             'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+            'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
         },
     )
 

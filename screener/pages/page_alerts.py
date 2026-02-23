@@ -1,35 +1,13 @@
 import streamlit as st
 import pandas as pd
-from urllib.parse import quote
 from typing import Dict, Optional
 from datetime import datetime
 from screener.alerts import generate_alerts, score_stock, recommend_combo
 from screener.alert_history import save_alerts
-from screener.utils import get_chart_url
+from screener.utils import get_chart_url, get_unusual_whales_url
 from screener.watchlist_store import add_to_watchlist, is_in_watchlist, get_watchlist_symbols
 from screener.data_fetcher import fetch_ohlcv
 from screener.config import DEFAULT_LOOKBACK_DAYS
-
-
-def _get_unusual_whales_url(symbol: str) -> str:
-    """Generate Unusual Whales option flow URL for a symbol."""
-    ticker = symbol.replace('.NS', '')
-    base_url = "https://unusualwhales.com/live-options-flow"
-    params = (
-        f"?limit=50"
-        f"&ticker_symbol={quote(ticker)}"
-        f"&excluded_tags[]=no_side"
-        f"&excluded_tags[]=mid_side"
-        f"&excluded_tags[]=bid_side"
-        f"&min_open_interest=1"
-        f"&report_flag[]=sweep"
-        f"&report_flag[]=floor"
-        f"&report_flag[]=normal"
-        f"&add_agg_trades=true"
-        f"&is_multi_leg=false"
-        f"&min_ask_perc=0.6"
-    )
-    return base_url + params
 
 
 def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFrame],
@@ -86,7 +64,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
 
     # Add Chart and Option Flow link columns
     alerts_df['Chart'] = alerts_df['Symbol'].apply(get_chart_url)
-    alerts_df['Option Flow'] = alerts_df['Symbol'].apply(_get_unusual_whales_url)
+    alerts_df['Option Flow'] = alerts_df['Symbol'].apply(get_unusual_whales_url)
 
     # Add checkbox column for watchlist selection (pre-checked if already in WL)
     wl_symbols = get_watchlist_symbols()  # Single load instead of per-row calls
@@ -214,7 +192,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
 
             # Quick link to Unusual Whales
             st.markdown("---")
-            uw_url = _get_unusual_whales_url(row['Symbol'])
+            uw_url = get_unusual_whales_url(row['Symbol'])
             st.markdown(f"**Option Flow:** [View on Unusual Whales]({uw_url})")
 
             # Add to watchlist from detail view

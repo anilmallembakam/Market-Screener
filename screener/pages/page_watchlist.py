@@ -8,7 +8,7 @@ from screener.watchlist_store import load_watchlist, remove_from_watchlist
 from screener.alert_history import fetch_performance_data, calculate_performance, compute_signal_performance
 from screener.alerts import detect_entry_signal
 from screener.db import db_save_entry_signals, db_load_active_entry_signals, db_update_entry_signal_status
-from screener.utils import get_chart_url
+from screener.utils import get_chart_url, get_unusual_whales_url
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -35,6 +35,7 @@ def _process_single_watchlist_item(item: dict) -> dict:
     price_data = _cached_fetch_watchlist_perf(symbol, date_added)
     perf = calculate_performance(item, price_data)
     chart_url = get_chart_url(symbol)
+    uw_url = get_unusual_whales_url(symbol)
 
     display_symbol = symbol.replace('.NS', '') if symbol.endswith('.NS') else symbol
     days_in_watchlist = (datetime.now() - datetime.strptime(date_added, '%Y-%m-%d')).days
@@ -44,6 +45,7 @@ def _process_single_watchlist_item(item: dict) -> dict:
         'Symbol': display_symbol,
         '_raw_symbol': symbol,
         'Chart': chart_url,
+        'Option Flow': uw_url,
         'Market': item_market,
         'Alert Date': alert_date,
         'Date Added': date_added,
@@ -98,20 +100,21 @@ def _render_summary_metrics(perf_df: pd.DataFrame):
     losing_steam = len(perf_df[perf_df['Momentum'] == 'Losing Steam'])
 
     with col1:
-        st.metric("Total Stocks", total)
+        st.metric("📊 Total Stocks", total)
     with col2:
-        st.metric("Winners (>5%)", winners,
-                  delta=f"{winners/total*100:.0f}%" if total else None)
+        st.metric("🟢 Winners (>5%)", winners,
+                  delta=f"{winners/total*100:.0f}% win rate" if total else None)
     with col3:
-        st.metric("Losers (<-5%)", losers,
+        st.metric("🔴 Losers (<-5%)", losers,
                   delta=f"-{losers/total*100:.0f}%" if total else None,
                   delta_color="inverse")
     with col4:
-        st.metric("Avg P&L", f"{avg_pnl:.1f}%",
-                  delta="Good" if avg_pnl > 0 else "Bad")
+        st.metric("📈 Avg P&L", f"{avg_pnl:.1f}%",
+                  delta="Profitable" if avg_pnl > 0 else "Unprofitable",
+                  delta_color="normal" if avg_pnl >= 0 else "inverse")
     with col5:
-        st.metric("Losing Steam", losing_steam,
-                  delta="Watch" if losing_steam > 0 else None,
+        st.metric("⚠️ Losing Steam", losing_steam,
+                  delta="Exit candidates" if losing_steam > 0 else "None",
                   delta_color="off")
 
 
@@ -139,7 +142,7 @@ def _render_performance_table(perf_df: pd.DataFrame):
         return ''
 
     display_cols = [
-        'Symbol', 'Chart', 'Market', 'Alert Date', 'Date Added', 'Days',
+        'Symbol', 'Chart', 'Option Flow', 'Market', 'Alert Date', 'Date Added', 'Days',
         'Direction', 'Score', 'Setup', 'Criteria',
         'Alert $', 'Now $', 'P&L %', 'Max Gain %', 'Max DD %',
         'Status', 'Momentum'
@@ -155,6 +158,7 @@ def _render_performance_table(perf_df: pd.DataFrame):
         column_config={
             'Symbol': st.column_config.TextColumn('Symbol', width='small'),
             'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
+            'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
             'Alert Date': st.column_config.TextColumn('Alerted', width='small'),
             'Alert $': st.column_config.NumberColumn('Alert $', format="%.2f"),
             'Now $': st.column_config.NumberColumn('Now $', format="%.2f"),
@@ -301,15 +305,16 @@ def _render_entry_signals(signals: list, skipped_count: int, key_prefix: str):
 def render(daily_data: Dict[str, pd.DataFrame], market: str = 'us'):
     watchlist = load_watchlist()
 
-    st.header(f"Watchlist Monitor ({len(watchlist)} stocks)")
+    st.header(f"⭐ Watchlist — {len(watchlist)} stock{'s' if len(watchlist) != 1 else ''}")
 
     if not watchlist:
-        st.info("Your watchlist is empty. Add stocks from the **Alerts/Summary** tab or **Tracker** tab.")
+        st.info("Your watchlist is empty. Curate stocks you want to monitor closely.")
         st.markdown("""
-        **How it works:**
-        1. Go to the **Alerts/Summary** tab and select rows, then click **Add Selected to Watchlist**
-        2. Or go to the **Tracker** tab and add stocks from Live Tracker / Calendar View
-        3. Come back here to monitor their performance over time
+        **How to add stocks:**
+        - **Alerts tab** → tick the checkbox on any row → click **Add Selected to Watchlist**
+        - **Tracker tab** → tick the checkbox on any alert → click **Add Selected to Watchlist**
+
+        Once added, come back here to track performance and scan for entry signals.
         """)
         return
 
@@ -328,21 +333,21 @@ def _render_watchlist_entry_tab(watchlist: List[dict], daily_data: Dict[str, pd.
     """Entry Signals tab — saved signals from DB + live scan for new ones."""
 
     # ── Section A: Saved Signals (from DB) ─────────────────────────────
-    st.subheader("Saved Entry Signals")
-    st.caption("Loaded from database — persists across sessions")
+    st.subheader("🗂️ Saved Entry Signals")
+    st.caption("Persisted across sessions. Close a signal when your trade is done.")
 
     saved = db_load_active_entry_signals(source='Watchlist')
 
     if saved:
         _render_saved_signals_table(saved, daily_data, key_prefix='wl_saved')
     else:
-        st.info("No saved entry signals yet. Scan below and save new ones.")
+        st.info("No saved entry signals yet. Run a scan below and save the ones you like.")
 
-    st.markdown("---")
+    st.divider()
 
     # ── Section B: New Signals Detected (live scan) ────────────────────
-    st.subheader("New Signals Detected")
-    st.caption("Live scan of watchlist — save to track performance")
+    st.subheader("🔍 New Signals Detected")
+    st.caption("Live scan of your watchlist for fresh Trend Following entry signals.")
 
     with st.spinner("Scanning for entry signals..."):
         entry_signals, entry_skipped = _scan_entry_signals(watchlist, daily_data)
@@ -613,14 +618,14 @@ def _render_watchlist_perf_tab(watchlist: List[dict], market: str):
     _render_summary_metrics(perf_df)
 
     # Performance table
-    st.subheader("Watchlist Performance")
+    st.subheader("📋 Watchlist Performance")
     _render_performance_table(perf_df)
 
     # Alerts losing steam section
     losing_steam_df = perf_df[perf_df['Momentum'] == 'Losing Steam']
     if not losing_steam_df.empty:
-        st.subheader("Losing Steam")
-        st.warning(f"{len(losing_steam_df)} stocks are showing weakening momentum - consider removing")
+        st.subheader("⚠️ Losing Steam")
+        st.warning(f"{len(losing_steam_df)} stock{'s' if len(losing_steam_df) != 1 else ''} showing weakening momentum — consider exiting or removing from watchlist.")
         st.dataframe(
             losing_steam_df[['Symbol', 'Chart', 'Market', 'Alert Date', 'Date Added', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Days']],
             use_container_width=True,
@@ -631,7 +636,8 @@ def _render_watchlist_perf_tab(watchlist: List[dict], market: str):
         )
 
     # Remove from Watchlist section
-    st.subheader("Manage Watchlist")
+    st.divider()
+    st.subheader("🗑️ Remove from Watchlist")
     symbols_in_list = perf_df['Symbol'].tolist()
     raw_symbols = perf_df['_raw_symbol'].tolist()
     symbol_map = dict(zip(symbols_in_list, raw_symbols))
