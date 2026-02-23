@@ -231,14 +231,14 @@ def _render_entry_signals(signals: list, skipped_count: int, key_prefix: str):
     # Summary metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Entry Signals", total)
+        st.metric("🎯 Entry Signals", total)
     with col2:
-        st.metric("Strong", strong)
+        st.metric("💪 Strong", strong)
     with col3:
-        st.metric("Moderate", moderate)
+        st.metric("📶 Moderate", moderate)
     with col4:
         if skipped_count > 0:
-            st.metric("Skipped", skipped_count, help="Stocks not in current data (different market?)")
+            st.metric("⏭️ Skipped", skipped_count, help="Stocks not in current data (different market?)")
 
     # Build and display table
     sig_df = _build_entry_signals_df(signals)
@@ -466,7 +466,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
             }
         )
 
@@ -482,7 +482,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                    'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
                 }
             )
 
@@ -495,7 +495,7 @@ def _render_live_tracker(daily_data: Dict[str, pd.DataFrame], market: str):
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                    'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
                 }
             )
 
@@ -875,7 +875,7 @@ def _render_weekly_summary(market: str):
                   delta="Watch!" if summary['losing_steam_count'] > 0 else None,
                   delta_color="off")
 
-    st.markdown("---")
+    st.divider()
 
     # Performance by Direction
     col1, col2 = st.columns(2)
@@ -908,7 +908,7 @@ def _render_weekly_summary(market: str):
         else:
             st.caption("No data")
 
-    st.markdown("---")
+    st.divider()
 
     # Best and Worst performers
     col1, col2 = st.columns(2)
@@ -1161,7 +1161,7 @@ def _render_winner_analytics(market: str):
     total = len(perf_df)
 
     # Summary
-    st.markdown("---")
+    st.divider()
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Alerts", total)
@@ -1177,7 +1177,7 @@ def _render_winner_analytics(market: str):
         st.warning(f"No winners found with P&L >= {min_pnl}%. Try lowering the threshold.")
         return
 
-    st.markdown("---")
+    st.divider()
     st.subheader("🔍 What Makes Winners Win?")
 
     # Analysis columns
@@ -1214,7 +1214,7 @@ def _render_winner_analytics(market: str):
             st.success(f"**Best direction: {best_dir}** (Win Rate: {dir_analysis.loc[best_dir, 'Win Rate %']:.0f}%)")
             st.dataframe(dir_analysis[['Winners', 'Total', 'Win Rate %', 'Avg P&L %']], use_container_width=True)
 
-    st.markdown("---")
+    st.divider()
 
     # Pattern Analysis
     col1, col2 = st.columns(2)
@@ -1260,7 +1260,7 @@ def _render_winner_analytics(market: str):
         else:
             st.info("No setup/combo data available")
 
-    st.markdown("---")
+    st.divider()
 
     # Criteria Analysis
     st.markdown("#### 🔑 Key Criteria in Winners")
@@ -1288,7 +1288,7 @@ def _render_winner_analytics(market: str):
     else:
         st.info("No criteria data available")
 
-    st.markdown("---")
+    st.divider()
 
     # Winners vs Losers Comparison
     st.markdown("#### ⚔️ Winners vs Losers Comparison")
@@ -1338,7 +1338,7 @@ def _render_winner_analytics(market: str):
         st.info(f"No losers with P&L <= -{min_pnl}% found for comparison")
 
     # Top Winners List
-    st.markdown("---")
+    st.divider()
     st.markdown("#### 🏆 Top 10 Winners")
     top_winners = winners_df.nlargest(10, 'pnl_pct')[['symbol', 'date', 'direction', 'score', 'pattern', 'combo', 'pnl_pct']]
     top_winners.columns = ['Symbol', 'Date', 'Direction', 'Score', 'Pattern', 'Setup', 'P&L %']

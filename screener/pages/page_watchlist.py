@@ -240,14 +240,14 @@ def _render_entry_signals(signals: list, skipped_count: int, key_prefix: str):
     # Summary metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Entry Signals", total)
+        st.metric("🎯 Entry Signals", total)
     with col2:
-        st.metric("Strong", strong)
+        st.metric("💪 Strong", strong)
     with col3:
-        st.metric("Moderate", moderate)
+        st.metric("📶 Moderate", moderate)
     with col4:
         if skipped_count > 0:
-            st.metric("Skipped", skipped_count, help="Stocks not in current data (different market?)")
+            st.metric("⏭️ Skipped", skipped_count, help="Stocks not in current data (different market?)")
 
     # Build and display table
     sig_df = _build_entry_signals_df(signals)
@@ -624,7 +624,7 @@ def _render_watchlist_perf_tab(watchlist: List[dict], market: str):
     # Alerts losing steam section
     losing_steam_df = perf_df[perf_df['Momentum'] == 'Losing Steam']
     if not losing_steam_df.empty:
-        st.subheader("⚠️ Losing Steam")
+        st.subheader("⚠️ Alerts Losing Steam")
         st.warning(f"{len(losing_steam_df)} stock{'s' if len(losing_steam_df) != 1 else ''} showing weakening momentum — consider exiting or removing from watchlist.")
         st.dataframe(
             losing_steam_df[['Symbol', 'Chart', 'Market', 'Alert Date', 'Date Added', 'Direction', 'Setup', 'P&L %', 'Max Gain %', 'Days']],

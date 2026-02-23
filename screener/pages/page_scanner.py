@@ -6,7 +6,7 @@ from screener.utils import get_chart_url, get_unusual_whales_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
-    st.header("Candlestick Pattern Scanner")
+    st.header("🕯️ Candlestick Pattern Scanner")
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -49,13 +49,13 @@ def render(daily_data: Dict[str, pd.DataFrame]):
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+                'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
                 'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
             },
         )
 
         # Summary counts
-        st.subheader("Summary")
+        st.subheader("📊 Summary")
         col_a, col_b = st.columns(2)
         with col_a:
             bullish_count = len(results[results['Signal'] == 'bullish'])
@@ -66,6 +66,6 @@ def render(daily_data: Dict[str, pd.DataFrame]):
 
         if selected_code is None:
             # Show pattern frequency
-            st.subheader("Pattern Frequency")
+            st.subheader("📉 Pattern Frequency")
             freq = results['Pattern'].value_counts().head(15)
             st.bar_chart(freq)

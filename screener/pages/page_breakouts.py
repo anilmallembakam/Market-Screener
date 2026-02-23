@@ -6,7 +6,7 @@ from screener.utils import get_chart_url, get_unusual_whales_url
 
 
 def render(daily_data: Dict[str, pd.DataFrame]):
-    st.header("Breakout Detection")
+    st.header("🚀 Breakout Detection")
 
     with st.spinner("Scanning for breakouts..."):
         results = scan_batch(daily_data)
@@ -44,13 +44,13 @@ def render(daily_data: Dict[str, pd.DataFrame]):
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Chart': st.column_config.LinkColumn('📈', display_text='📈', width='small'),
+            'Chart': st.column_config.LinkColumn('Chart', display_text='View', width='small'),
             'Option Flow': st.column_config.LinkColumn('Flow', display_text='View', width='small'),
         },
     )
 
     # Summary metrics
-    st.subheader("Summary")
+    st.subheader("📊 Summary")
     col_a, col_b, col_c = st.columns(3)
     with col_a:
         st.metric("Breakout Up", len(results[results['Status'] == 'Breakout Up']))

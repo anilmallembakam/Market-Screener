@@ -12,7 +12,7 @@ from screener.config import DEFAULT_LOOKBACK_DAYS
 
 def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFrame],
            market: str = 'us', index_symbol: str = ''):
-    st.header("Alerts & Summary")
+    st.header("🔔 Alerts & Summary")
 
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
@@ -145,7 +145,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
         else:
             st.warning("No new stocks selected. Tick the checkboxes first.")
 
-    st.subheader("Detail View")
+    st.subheader("🔍 Detail View")
     for _, row in alerts_df.head(20).iterrows():
         with st.expander(f"{row['Symbol']} - {row['Direction']} (Score: {row['Score']})"):
             if row['Symbol'] not in daily_data:
@@ -180,7 +180,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
                 if bear_p:
                     st.markdown(f"**Bearish patterns:** :red[{', '.join(bear_p)}]")
 
-            st.markdown("---")
+            st.divider()
             st.markdown("**Technical Signals:**")
             for c in result['criteria']:
                 if c['signal'] == 'bullish':
@@ -191,7 +191,7 @@ def render(daily_data: Dict[str, pd.DataFrame], weekly_data: Dict[str, pd.DataFr
                     st.markdown(f"  ~ **{c['criterion']}**: {c['detail']}")
 
             # Quick link to Unusual Whales
-            st.markdown("---")
+            st.divider()
             uw_url = get_unusual_whales_url(row['Symbol'])
             st.markdown(f"**Option Flow:** [View on Unusual Whales]({uw_url})")
 
